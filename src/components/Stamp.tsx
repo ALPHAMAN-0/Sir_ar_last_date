@@ -15,7 +15,8 @@ export function Stamp({ status, deadlinePassed, detail, large = false }: Props) 
   return (
     <span className={`stamp stamp--${tone}${large ? ' stamp--large' : ''}`}>
       <span className="stamp__label">{statusLabel(status, deadlinePassed)}</span>
-      {detail ? <span className="stamp__detail">{detail}</span> : null}
+      {/* A real space, so screen readers and copied text do not read "Lateby". */}
+      {detail ? <span className="stamp__detail"> {detail}</span> : null}
     </span>
   )
 }

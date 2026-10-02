@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   formatDateTime,
+  formatDateTimeShort,
   formatDayKey,
   formatDuration,
   formatTime,
@@ -68,6 +69,14 @@ describe('date text', () => {
     useZone('Asia/Dhaka')
     const deadline = parseDeadlineInput('2026-10-05T23:59')
     expect(formatDateTime(deadline?.ms)).toBe('05 Oct 2026, 23:59')
+  })
+
+  it('drops the year in the short form only when it is this year', () => {
+    useZone('Asia/Dhaka')
+    const now = Date.parse('2026-10-02T06:00:00Z')
+    expect(formatDateTimeShort('2026-09-25T15:10:00Z', now)).toBe('25 Sep, 21:10')
+    expect(formatDateTimeShort('2025-12-05T09:46:00Z', now)).toBe('05 Dec 2025, 15:46')
+    expect(formatDateTimeShort(null, now)).toBe('')
   })
 
   it('returns nothing for missing or broken values', () => {

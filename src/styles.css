@@ -128,6 +128,7 @@ p {
 
 .page {
   position: relative;
+  min-height: 100vh;
   max-width: 82rem;
   margin: 0 auto;
   padding: 0 var(--gutter) 3rem;
@@ -764,7 +765,7 @@ th.is-number .sort {
   background: var(--sheet-alt);
 }
 .entry td {
-  padding: 0.55rem 0.7rem;
+  padding: 0.55rem 0.65rem;
   vertical-align: top;
 }
 .is-number {
@@ -786,6 +787,9 @@ th.is-number .sort {
 .entry--muted,
 .entry--busy { --tone: var(--rule); }
 
+.entry__name {
+  min-width: 9.5rem;
+}
 .entry__name a {
   font-weight: 700;
   text-decoration: none;
@@ -794,7 +798,8 @@ th.is-number .sort {
   text-decoration: underline;
 }
 .entry__repo {
-  max-width: 17rem;
+  min-width: 10rem;
+  max-width: 18rem;
   overflow-wrap: anywhere;
   font-family: var(--mono);
   font-size: 0.82rem;
@@ -803,7 +808,7 @@ th.is-number .sort {
   color: var(--muted);
 }
 .entry__status {
-  min-width: 11rem;
+  min-width: 13rem;
 }
 .entry__notes {
   display: block;
@@ -1180,7 +1185,14 @@ th.is-number .sort {
   .ledger__table thead {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     margin-bottom: 0.6rem;
+  }
+  .ledger__table thead::before {
+    content: 'Sort by';
+    margin-right: 0.25rem;
+    font-size: 0.86rem;
+    font-weight: 700;
   }
   .ledger__table thead tr {
     display: contents;
@@ -1197,7 +1209,7 @@ th.is-number .sort {
 
   .entry {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.15rem 0.75rem;
     margin-bottom: 0.6rem;
     padding: 0.75rem 0.85rem;
@@ -1211,7 +1223,11 @@ th.is-number .sort {
   }
   .entry td {
     padding: 0;
+    min-width: 0;
     text-align: left;
+  }
+  .entry td.mono {
+    white-space: normal;
   }
   .entry td:empty {
     display: none;
@@ -1230,7 +1246,7 @@ th.is-number .sort {
   .entry__name,
   .entry__status,
   .entry__repo {
-    grid-column: 1 / -1;
+    min-width: 0;
     max-width: none;
   }
   .entry__name::before,

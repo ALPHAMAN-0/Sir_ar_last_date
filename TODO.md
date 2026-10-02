@@ -1,58 +1,38 @@
 # Sir_ar_last_date — work status
 
-Stopped on 2026-10-02 at the owner's request. The app does **not** run yet.
-Full plan: `~/.claude/plans/ok-i-want-to-distributed-sky.md`
+Updated 2026-10-02. The app is built and runs locally. It has not been tested
+against real GitHub yet and is not online, because both need the owner's token
+and Cloudflare login.
 
 ## Done
-- [x] Plan agreed (sheet format, deadline rule, statuses, hosting, screens).
-- [x] Project set up: Vite + React + TypeScript, Cloudflare Vite plugin, Wrangler config
-      (`wrangler.jsonc`: single-page app, Workers Cache, two rate limiters, required
-      secret), Vitest, SheetJS 0.20.3, secrets ignored by git.
-- [x] Server (`worker/`): GitHub client with quota reserve and back-off, and the five
-      routes `/api/v1/repos`, `/activity`, `/commits`, `/commit`, `/status`.
-- [x] Shared request rules (`shared/`): input validation and one canonical URL per request.
-- [x] Server tests: 30 pass. Server type-check is clean.
-- [x] Link reader (`src/sheet/parseRepoLink.ts`) and time helpers (`src/logic/time.ts`) written.
+- [x] Server (`worker/`): GitHub client with quota reserve and back-off, five routes,
+      request validation, cache headers, per-visitor rate limits.
+- [x] Sheet reader, column detection and column picker.
+- [x] The status rule (On time / Changed after deadline / Late / No submission / Not found).
+- [x] Push time for every commit, and the timeline with the deadline line.
+- [x] Screens: upload, register table (sort, filter, search), person timeline with
+      changed files, phone layout, dark mode.
+- [x] Excel export in the on-screen order.
+- [x] Security headers (`public/_headers`), strict Content-Security-Policy.
+- [x] 133 unit tests pass; type-check and lint are clean.
+- [x] Browser test with sample data: 39 of 39 checks pass on the dev server and on
+      the production build (no console errors, no CSP violations).
+- [x] README.
 
 ## Not done
-### Small fixes
-- [ ] 2 of 35 tests fail in `src/sheet/parseRepoLink.test.ts`. The two bad links are
-      still rejected; only the expected reason in the test is wrong
-      (`github.com@evil.example` gives `malformed`, `github.com/a/..` gives `not_a_repo`).
-- [ ] `src/App.tsx` and `src/main.tsx` are still the Vite demo and import files that were
-      deleted, so `npm run dev` and `npm run build` fail for the page until the real
-      screens are written.
-- [ ] `README.md` is still the Vite template text.
-
-### Logic still to write (each with tests)
-- [ ] Sheet reader: read the Excel file, find the id / name / link columns, merged
-      cells, links stored as hyperlinks (`src/sheet/parseSheet.ts`).
-- [ ] The On time / Changed after deadline / Late / No submission / Not found rule
-      (`src/logic/verdict.ts`).
-- [ ] Push time for each commit (`src/logic/pushAttribution.ts`).
-- [ ] Tests for the time helpers.
-- [ ] Excel export (`src/sheet/exportXlsx.ts`).
-
-### Page still to write
-- [ ] Browser API client: request queue, retries, pause when a limit is hit.
-- [ ] App state, remembered in the browser, with a Clear button.
-- [ ] Screens: upload, deadline box, people table (sort, filter, search),
-      person timeline with changed files, limit notice, styling, phone layout.
-- [ ] `public/_headers` (security headers) and `public/robots.txt`.
-
-### Testing still to do
-- [ ] Nothing has been tested against real GitHub through the server yet.
-- [ ] Browser test with a test sheet (AboutMe must read "Changed after deadline" for a
-      deadline of 2026-09-25 13:00 Dhaka time).
-- [ ] After deploy: edge cache hit, 429 from the rate limiter, token never in any response.
-
-### Steps only the owner can do
+### Needs the owner
 - [ ] GitHub token: `.dev.vars` still contains `PASTE_TOKEN_HERE`. Create a fine-grained
       token with "Public repositories" access and no permissions, and paste it there.
-- [ ] Cloudflare: sign up, `npx wrangler login`, `npx wrangler secret put GITHUB_TOKEN`.
-- [ ] Deploy: `npm run deploy`.
+- [ ] Cloudflare: sign up, then `npx wrangler login`.
+- [ ] `npx wrangler secret put GITHUB_TOKEN`, then `npm run deploy`.
 
-### Git
-- [ ] Only the first setup is committed (`07e1565`, pushed to the private repo).
-      Everything written after it (`shared/`, most of `worker/`, `src/sheet/`,
-      `src/logic/`, this file) is not committed.
+### Then
+- [ ] Test against real GitHub with the token (expected: AboutMe reads "Changed after
+      deadline" for a deadline of 2026-09-25 13:00 Dhaka time; a private repo reads
+      "Not found").
+- [ ] After deploy: confirm an edge cache hit, a 429 from the rate limiter, and that
+      the token appears in no response and no built file.
+
+### Later, by choice
+- By-date screen across all people, inline diff viewer, fork-aware logic,
+  per-row deadlines, access code, private repos, auto-deploy on push.

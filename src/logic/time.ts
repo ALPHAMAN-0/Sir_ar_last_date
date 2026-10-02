@@ -50,6 +50,18 @@ export function formatDateTime(instant: string | number | null | undefined): str
   return Number.isNaN(date.getTime()) ? '' : `${dayText(date)}, ${timeText(date)}`
 }
 
+/** "25 Sep, 15:05": the year is left out when it is the current one. For tight table columns. */
+export function formatDateTimeShort(
+  instant: string | number | null | undefined,
+  now: number = Date.now(),
+): string {
+  if (instant === null || instant === undefined) return ''
+  const date = new Date(instant)
+  if (Number.isNaN(date.getTime())) return ''
+  if (date.getFullYear() !== new Date(now).getFullYear()) return formatDateTime(instant)
+  return `${pad(date.getDate())} ${MONTHS[date.getMonth()]}, ${timeText(date)}`
+}
+
 /** "Fri, 25 Sep 2026" for a "YYYY-MM-DD" key. */
 export function formatDayKey(key: string): string {
   const [year, month, day] = key.split('-').map(Number)

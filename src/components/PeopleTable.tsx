@@ -1,6 +1,6 @@
 import type { MouseEvent } from 'react'
 import { latenessText, noteTexts, okMeta, repoLinkFor, STATUS_TONE } from '../logic/people.ts'
-import { formatDateTime } from '../logic/time.ts'
+import { formatDateTime, formatDateTimeShort } from '../logic/time.ts'
 import { personHref } from '../state/hooks.ts'
 import { setSort, type PersonRow, type Sort, type SortColumn } from '../state/store.ts'
 import { Stamp } from './Stamp.tsx'
@@ -95,14 +95,22 @@ export function PeopleTable({ people, sort, deadlinePassed }: Props) {
                 <td className="mono" data-label="Late by">
                   {latenessText(verdict) || (verdict.need && verdict.status === 'late' ? '…' : '')}
                 </td>
-                <td className="mono" data-label="Repo created">
-                  {formatDateTime(meta?.createdAt)}
+                <td className="mono" data-label="Repo created" title={formatDateTime(meta?.createdAt)}>
+                  {formatDateTimeShort(meta?.createdAt)}
                 </td>
-                <td className="mono" data-label="Last push">
-                  {hasWork ? formatDateTime(meta.pushedAt) : ''}
+                <td
+                  className="mono"
+                  data-label="Last push"
+                  title={hasWork ? formatDateTime(meta.pushedAt) : undefined}
+                >
+                  {hasWork ? formatDateTimeShort(meta.pushedAt) : ''}
                 </td>
-                <td className="mono" data-label="Last commit">
-                  {formatDateTime(meta?.headCommittedAt)}
+                <td
+                  className="mono"
+                  data-label="Last commit"
+                  title={formatDateTime(meta?.headCommittedAt)}
+                >
+                  {formatDateTimeShort(meta?.headCommittedAt)}
                 </td>
                 <td className="is-number mono" data-label="Commits">
                   {hasWork ? meta.totalCommits : ''}
