@@ -1,0 +1,4 @@
+# Copy this file to .dev.vars and put your GitHub token after the = sign.
+# Use a fine-grained token with "Public repositories" access and no permissions.
+# .dev.vars is ignored by git. Never commit a real token.
+GITHUB_TOKEN=
