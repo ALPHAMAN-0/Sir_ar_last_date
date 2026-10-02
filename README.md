@@ -80,14 +80,16 @@ Every visitor shares one GitHub token, so:
 
 - Answers are cached at Cloudflare's edge (repo facts for 60 seconds, commits and
   file lists for a week), so repeated checks cost nothing.
-- Each visitor is limited to 40 repo lookups and 240 other requests per minute.
+- Each visitor is limited to 40 list requests (repo facts, commit lists) and 240 detail
+  requests (push logs, file lists) per minute.
 - The app stops calling GitHub when fewer than 500 of the token's 5,000 requests
   per hour are left, so the token owner's own tools keep working. The page then
   says when to try again.
 - The token never leaves the server. Other websites cannot call the API.
 
-Checking a sheet of 200 people costs about 10 requests. Opening a person costs
-one request per commit whose files are shown.
+Checking a sheet of 200 people costs about 10 requests, plus one for each person
+who pushed after the deadline. Opening a person costs one request per commit whose
+files are shown.
 
 ## How it is built
 
