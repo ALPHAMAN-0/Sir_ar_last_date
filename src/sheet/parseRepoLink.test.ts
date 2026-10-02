@@ -63,7 +63,9 @@ describe('parseRepoLink', () => {
   })
 
   it('rejects names GitHub would never accept', () => {
-    expect(key('https://github.com/a/..')).toBe('!malformed')
+    // The URL parser resolves "/a/.." to "/", which is no longer a repo path.
+    expect(key('https://github.com/a/..')).toBe('!not_a_repo')
+    expect(key('a/..')).toBe('!malformed')
     expect(key('https://github.com/-bad/repo')).toBe('!malformed')
     expect(key('https://github.com/a/b%2Fc')).toBe('!malformed')
     expect(key('https://github.com/a/%E0%A4%A')).toBe('!malformed')

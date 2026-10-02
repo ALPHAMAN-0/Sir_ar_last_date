@@ -35,38 +35,31 @@ export function localDateKey(instant: string | number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
-const DATE_TIME = new Intl.DateTimeFormat('en-GB', {
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false,
-})
-const DAY = new Intl.DateTimeFormat('en-GB', {
-  weekday: 'short',
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-})
-const TIME = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })
+// Written out by hand so every browser shows exactly the same text.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-/** "25 Sep 2026, 15:05" */
+const dayText = (date: Date) =>
+  `${pad(date.getDate())} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`
+const timeText = (date: Date) => `${pad(date.getHours())}:${pad(date.getMinutes())}`
+
+/** "25 Sep 2026, 15:05" in local time. */
 export function formatDateTime(instant: string | number | null | undefined): string {
   if (instant === null || instant === undefined) return ''
   const date = new Date(instant)
-  return Number.isNaN(date.getTime()) ? '' : DATE_TIME.format(date)
+  return Number.isNaN(date.getTime()) ? '' : `${dayText(date)}, ${timeText(date)}`
 }
 
 /** "Fri, 25 Sep 2026" for a "YYYY-MM-DD" key. */
 export function formatDayKey(key: string): string {
   const [year, month, day] = key.split('-').map(Number)
-  return DAY.format(new Date(year, month - 1, day))
+  const date = new Date(year, month - 1, day)
+  return `${WEEKDAYS[date.getDay()]}, ${dayText(date)}`
 }
 
-/** "15:05" */
+/** "15:05" in local time. */
 export function formatTime(instant: string | number): string {
-  return TIME.format(new Date(instant))
+  return timeText(new Date(instant))
 }
 
 /** "3h 20m", "2d 4h", "45 min". Rounds down, never shows zero for a real delay. */

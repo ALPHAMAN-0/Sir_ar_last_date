@@ -58,12 +58,12 @@ export function parseRepoLink(input: string | null | undefined): LinkResult {
     return fail('malformed')
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return fail('not_github')
-  if (url.username || url.password) return fail('malformed')
 
   const host = url.hostname.toLowerCase()
   if (host === 'gist.github.com') return fail('gist')
   if (host.endsWith('.github.io')) return fail('pages')
   if (host !== 'github.com' && host !== 'www.github.com') return fail('not_github')
+  if (url.username || url.password) return fail('malformed')
 
   const segments = url.pathname.split('/').filter(Boolean)
   if (segments.length < 2 || SITE_PAGES.has(segments[0].toLowerCase())) return fail('not_a_repo')
