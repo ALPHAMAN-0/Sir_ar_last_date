@@ -1401,6 +1401,9 @@ th.is-number .sort {
   color: var(--ink-soft);
   font-size: 0.94rem;
 }
+.similarity__download {
+  margin: 0.6rem 0 1rem;
+}
 .similarity__errors {
   padding: 0.6rem 0.85rem;
   background: var(--warn-bg);

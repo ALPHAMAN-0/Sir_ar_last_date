@@ -5,12 +5,14 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import type { RepoOk } from '../../shared/api.ts'
+import { zoneLabel } from '../logic/time.ts'
 import { tier } from '../similarity/compare.ts'
 import { percent, tierLabel, tierTone } from '../similarity/format.ts'
+import { downloadReport, type ReportPair } from '../similarity/report.ts'
 import { comparableRepos, treeInputs } from '../similarity/run.ts'
 import { fetchAll, type TreeError } from '../similarity/trees.ts'
 import type { FileTree, Pair } from '../similarity/types.ts'
-import { useApp, usePeople } from '../state/hooks.ts'
+import { useApp, useNow, usePeople } from '../state/hooks.ts'
 
 type ProgressEvent = { done: number; total: number; current: string }
 
@@ -121,22 +123,33 @@ function useSimilarityRun(comparable: readonly RepoOk[]): RunOutcome {
 export function SimilarityView() {
   const sheet = useApp((state) => state.sheet)
   const people = usePeople()
+  const now = useNow()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
-  // Map: owner/repo (link.key) -> a label like "20-41234-1 · Rahim"
-  const labelByKey = (() => {
-    const map = new Map<string, string>()
+  // One map per repo key. The label is "id · name" when both exist,
+  // falling back to the key. The .xlsx export uses the structured parts.
+  const metaByKey = (() => {
+    const map = new Map<string, { id: string; name: string; branch: string; headOid: string; label: string }>()
     for (const person of people) {
       const link = person.row.link
       if (!link.ok) continue
+      if (map.has(link.key)) continue
+      const meta = person.meta
       const parts: string[] = []
       if (person.row.id) parts.push(person.row.id)
       if (person.row.name) parts.push(person.row.name)
-      const label = parts.length > 0 ? parts.join(' · ') : link.key
-      if (!map.has(link.key)) map.set(link.key, label)
+      map.set(link.key, {
+        id: person.row.id,
+        name: person.row.name,
+        branch: meta?.state === 'ok' ? (meta.defaultBranch ?? '') : '',
+        headOid: meta?.state === 'ok' ? (meta.headOid ?? '') : '',
+        label: parts.length > 0 ? parts.join(' · ') : link.key,
+      })
     }
     return map
   })()
+  const labelByKey = new Map<string, string>()
+  for (const [key, meta] of metaByKey) labelByKey.set(key, meta.label)
 
   const okRepos = people.flatMap((person) => {
     const key = person.row.link.ok ? person.row.link.key : null
@@ -176,6 +189,42 @@ export function SimilarityView() {
       if (next.has(key)) next.delete(key)
       else next.add(key)
       return next
+    })
+  }
+
+  const totalPossiblePairs = (comparable.length * (comparable.length - 1)) / 2
+
+  const onDownload = () => {
+    if (phase !== 'ready' || !result) return
+    const rows: ReportPair[] = sortedPairs.map((pair) => {
+      const aMeta = metaByKey.get(pair.aKey)
+      const bMeta = metaByKey.get(pair.bKey)
+      return {
+        aKey: pair.aKey,
+        aId: aMeta?.id ?? '',
+        aName: aMeta?.name ?? '',
+        aBranch: pair.aBranch,
+        aHeadOid: pair.aHeadOid,
+        bKey: pair.bKey,
+        bId: bMeta?.id ?? '',
+        bName: bMeta?.name ?? '',
+        bBranch: pair.bBranch,
+        bHeadOid: pair.bHeadOid,
+        overlap: pair.overlap,
+        union: pair.union,
+        score: pair.score,
+        shared: pair.shared,
+        onlyA: pair.onlyA,
+        onlyB: pair.onlyB,
+      }
+    })
+    downloadReport(rows, {
+      sheetName: sheet.sheetName,
+      checkedAt: now,
+      totalTrees: comparable.length,
+      failedTrees: errorCount,
+      totalPairs: totalPossiblePairs,
+      zone: zoneLabel(),
     })
   }
 
@@ -238,6 +287,14 @@ export function SimilarityView() {
             {errorCount > 0 ? `, ${errorCount} could not be listed` : ''}.{' '}
             {sortedPairs.length} {sortedPairs.length === 1 ? 'pair' : 'pairs'} compared.
           </p>
+
+          {sortedPairs.length > 0 ? (
+            <p className="similarity__download">
+              <button type="button" className="button button--primary" onClick={onDownload}>
+                Download .xlsx
+              </button>
+            </p>
+          ) : null}
 
           {errorCount > 0 ? (
             <details className="similarity__errors">
