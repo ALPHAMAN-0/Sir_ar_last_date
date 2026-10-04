@@ -66,8 +66,8 @@ changing the plan.
 
 | Field | Value |
 | --- | --- |
-| Iteration | 6 (Phase 4 done; tests 173/173, lint clean, build clean) |
-| Last update | 2026-10-04 |
+| Iteration | 7 (Phase 5 done; tests 183/183, lint clean, build clean) |
+| Last update | 2026-10-05 |
 | Decisions locked | scope=browser-only, math=file-name-overlap, pairs=N×N, report=browser+xlsx |
 | Open questions | see **Open questions** at the bottom |
 
@@ -455,3 +455,17 @@ Update this on every change to the plan.
   the state into a single `RunOutcome` discriminated union so all
   setState calls happen inside the async callback. 5 new tests pass;
   173/173 total. Lint and build clean.
+- **2026-10-05, iteration 7**: Phase 5 done. Added
+  `src/similarity/{report.ts, report.test.ts}` for the .xlsx export
+  that the on-screen table already advertises. TDD cycle:
+  RED — `report.test.ts` failed to import `./report.ts` (module not
+  found); GREEN — wrote the module mirroring `src/sheet/exportXlsx.ts`
+  in style (Results + Info sheets, formula-injection-safe text cells,
+  local-zone file name `similarity-2026-10-05-2359.xlsx`); refactor —
+  threaded an optional `writer` parameter into `downloadReport` so the
+  browser-only `XLSX.writeFile` side effect is testable in Node. 10 new
+  tests pass; 183/183 total. Overall coverage rises to 81.33% lines /
+  79.18% stmts (was 80.66% / 78.63%); `report.ts` itself is 100%
+  lines / 100% functions. The "Download .xlsx" button lives in
+  `SimilarityView` under the summary; it uses `useNow()` to avoid
+  the React Compiler purity rule. Lint and build clean.
