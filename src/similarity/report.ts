@@ -149,8 +149,10 @@ export function reportFileName(checkedAt: number): string {
 }
 
 /** Writes the workbook to disk as a real `.xlsx`. Same shape as the register export. */
-export function downloadReport(pairs: readonly ReportPair[], info: ReportInfo): void {
-  XLSX.writeFile(buildReportWorkbook(pairs, info), reportFileName(info.checkedAt), {
-    compression: true,
-  })
+export function downloadReport(
+  pairs: readonly ReportPair[],
+  info: ReportInfo,
+  writer: typeof XLSX.writeFile = XLSX.writeFile,
+): void {
+  writer(buildReportWorkbook(pairs, info), reportFileName(info.checkedAt), { compression: true })
 }

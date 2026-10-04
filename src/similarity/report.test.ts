@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import * as XLSX from 'xlsx'
 import {
   buildReportWorkbook,
+  downloadReport,
   reportFileName,
   type ReportInfo,
   type ReportPair,
@@ -149,5 +150,18 @@ describe('reportFileName', () => {
     expect(reportFileName(Date.parse('2026-10-05T18:00:00Z'))).toBe(
       'similarity-2026-10-06-0000.xlsx',
     )
+  })
+})
+
+describe('downloadReport', () => {
+  it('writes the workbook to disk with the right name and compression', () => {
+    let captured: { name: string; compression: boolean | undefined } | null = null
+    const writer = ((_book: unknown, name: string, options?: { compression?: boolean }) => {
+      captured = { name, compression: options?.compression }
+      return undefined as unknown as void
+    }) as typeof XLSX.writeFile
+    process.env.TZ = 'Asia/Dhaka'
+    downloadReport([pair()], { ...info, checkedAt: Date.parse('2026-10-05T17:59:00Z') }, writer)
+    expect(captured).toEqual({ name: 'similarity-2026-10-05-2359.xlsx', compression: true })
   })
 })
