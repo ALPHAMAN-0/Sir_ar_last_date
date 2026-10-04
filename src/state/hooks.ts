@@ -23,14 +23,22 @@ function subscribeHash(listener: () => void): () => void {
   return () => window.removeEventListener('hashchange', listener)
 }
 
-/** `#/p/r12` opens the person on sheet row 12. Anything else is the table. */
-export function useRoute(): { rowId: string | null } {
+export type Route =
+  | { kind: 'register' }
+  | { kind: 'person'; rowId: string }
+  | { kind: 'similarity' }
+
+/** `#/p/r12` opens the person on sheet row 12. `#/s` opens the similarity tab. Anything else is the table. */
+export function useRoute(): Route {
   const hash = useSyncExternalStore(subscribeHash, () => window.location.hash)
-  const match = /^#\/p\/(r\d+)$/.exec(hash)
-  return { rowId: match ? match[1] : null }
+  const person = /^#\/p\/(r\d+)$/.exec(hash)
+  if (person) return { kind: 'person', rowId: person[1] }
+  if (hash === '#/s') return { kind: 'similarity' }
+  return { kind: 'register' }
 }
 
 export const personHref = (rowId: string) => `#/p/${rowId}`
+export const similarityHref = () => '#/s'
 
 /** The current time, refreshed on an interval, for "passed 3h ago" style text. */
 export function useNow(intervalMs = 30_000): number {
