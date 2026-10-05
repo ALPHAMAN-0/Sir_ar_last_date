@@ -14,8 +14,9 @@ Three columns, in any order. Header names are matched loosely (`Repo Link`,
 
 | id | name | repolink |
 |----|------|----------|
-| 20-41234-1 | Rahim Uddin | https://github.com/rahim/task-1 |
-| 20-41235-1 | Karim Hasan | github.com/karim/task-1 |
+| 22-46001-1 | Rahim Uddin | https://github.com/octocat/Hello-World |
+| 22-46002-1 | Nusrat Jahan | https://github.com/octocat/Spoon-Knife |
+| 22-46003-1 | Tanvir Ahmed | github.com/octocat/octocat.github.io |
 
 `.xlsx`, `.xls` and `.csv` are accepted, up to 1,000 people and 5 MB. Repos must be public.
 
