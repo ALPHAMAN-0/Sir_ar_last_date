@@ -4,6 +4,7 @@
 interface __BaseEnv_Env {
 	RL_GRAPHQL: RateLimit;
 	RL_REST: RateLimit;
+	RL_TREE: RateLimit;
 	GITHUB_TOKEN: string;
 }
 declare namespace Cloudflare {

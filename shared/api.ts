@@ -103,6 +103,12 @@ export type ActivityParams = {
 }
 export type CommitsParams = { repo: string; ref: string; after?: string }
 export type CommitParams = { repo: string; sha: string; page?: number }
+export type TreeParams = { repo: string; sha: string }
+export type TreeResponse = {
+  fetchedAt: string
+  paths: string[]
+  truncated: boolean
+}
 
 const enc = encodeURIComponent
 
@@ -146,10 +152,15 @@ export function commitQuery(p: CommitParams): string {
   ])
 }
 
+export function treeQuery(p: TreeParams): string {
+  return join([`repo=${enc(p.repo)}`, `sha=${enc(p.sha)}`])
+}
+
 export const reposUrl = (keys: readonly string[]) => `${API_BASE}/repos?${reposQuery(keys)}`
 export const activityUrl = (p: ActivityParams) => `${API_BASE}/activity?${activityQuery(p)}`
 export const commitsUrl = (p: CommitsParams) => `${API_BASE}/commits?${commitsQuery(p)}`
 export const commitUrl = (p: CommitParams) => `${API_BASE}/commit?${commitQuery(p)}`
+export const treeUrl = (p: TreeParams) => `${API_BASE}/tree?${treeQuery(p)}`
 export const statusUrl = () => `${API_BASE}/status`
 
 // Parsers used by the Worker. Each returns null unless every value is valid AND
@@ -225,4 +236,14 @@ export function parseCommitQuery(search: string): CommitParams | null {
     parsed.page = page
   }
   return `?${commitQuery(parsed)}` === search ? parsed : null
+}
+
+export function parseTreeQuery(search: string): TreeParams | null {
+  const params = new URLSearchParams(search)
+  if (!only(params, ['repo', 'sha'])) return null
+  const repo = single(params, 'repo')
+  const sha = single(params, 'sha')
+  if (!repo || !isRepoKey(repo) || !sha || !isSha(sha)) return null
+  const parsed: TreeParams = { repo, sha }
+  return `?${treeQuery(parsed)}` === search ? parsed : null
 }

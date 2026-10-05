@@ -49,24 +49,21 @@ describe('runComparison', () => {
   it('skips repos with no head, fetches the rest, and runs the comparison', async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.includes('octocat/hello-world')) {
+      if (url.includes('hello-world')) {
         return new Response(
           JSON.stringify({
-            tree: [
-              { path: 'README.md', type: 'blob' },
-              { path: 'src/main.js', type: 'blob' },
-            ],
+            fetchedAt: '2026-10-05T00:00:00Z',
+            paths: ['README.md', 'src/main.js'],
+            truncated: false,
           }),
         )
       }
-      if (url.includes('octocat/another')) {
+      if (url.includes('another')) {
         return new Response(
           JSON.stringify({
-            tree: [
-              { path: 'README.md', type: 'blob' },
-              { path: 'src/main.js', type: 'blob' },
-              { path: 'docs/index.md', type: 'blob' },
-            ],
+            fetchedAt: '2026-10-05T00:00:00Z',
+            paths: ['README.md', 'docs/index.md', 'src/main.js'],
+            truncated: false,
           }),
         )
       }
@@ -100,8 +97,14 @@ describe('runComparison', () => {
   it('records per-repo errors without failing the whole run', async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.includes('octocat/good')) {
-        return new Response(JSON.stringify({ tree: [{ path: 'a.txt', type: 'blob' }] }))
+      if (url.includes('good')) {
+        return new Response(
+          JSON.stringify({
+            fetchedAt: '2026-10-05T00:00:00Z',
+            paths: ['a.txt'],
+            truncated: false,
+          }),
+        )
       }
       return new Response('{}', { status: 404 })
     })
@@ -121,7 +124,13 @@ describe('runComparison', () => {
 
   it('uses an injected comparison function for tests', async () => {
     const fetchImpl = async () =>
-      new Response(JSON.stringify({ tree: [{ path: 'x', type: 'blob' }] }))
+      new Response(
+        JSON.stringify({
+          fetchedAt: '2026-10-05T00:00:00Z',
+          paths: ['x'],
+          truncated: false,
+        }),
+      )
     const stub = vi.fn(() => [])
 
     const result = await runComparison(

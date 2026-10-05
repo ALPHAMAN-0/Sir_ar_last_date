@@ -34,16 +34,13 @@ afterEach(() => {
 })
 
 describe('fetchTree', () => {
-  it('hits api.github.com anonymously and keeps only blob paths', async () => {
+  it('hits the Worker /api/v1/tree and reads pre-cleaned paths', async () => {
     handler = () =>
       new Response(
         JSON.stringify({
-          sha: SHA,
-          tree: [
-            { path: 'README.md', type: 'blob' },
-            { path: 'src', type: 'tree' },
-            { path: 'src/main.js', type: 'blob' },
-          ],
+          fetchedAt: '2026-10-05T00:00:00Z',
+          paths: ['README.md', 'src/main.js'],
+          truncated: false,
         }),
       )
     const result = await fetchTree(REPO, SHA, 'main', {
@@ -58,20 +55,17 @@ describe('fetchTree', () => {
     expect(result.fromCache).toBe(false)
     expect(result.tree.paths).toEqual(['README.md', 'src/main.js'])
     expect(result.tree.branch).toBe('main')
-    expect(calls).toEqual([
-      `https://api.github.com/repos/${REPO}/git/trees/${SHA}?recursive=1`,
-    ])
+    expect(result.tree.fetchedAt).toBe('2026-10-05T00:00:00Z')
+    expect(calls).toEqual([`/api/v1/tree?repo=${encodeURIComponent(REPO)}&sha=${SHA}`])
   })
 
   it('returns blob paths sorted and unique', async () => {
     handler = () =>
       new Response(
         JSON.stringify({
-          tree: [
-            { path: 'src/main.js', type: 'blob' },
-            { path: 'src/main.js', type: 'blob' },
-            { path: 'README.md', type: 'blob' },
-          ],
+          fetchedAt: '2026-10-05T00:00:00Z',
+          paths: ['README.md', 'src/main.js'],
+          truncated: false,
         }),
       )
     const result = await fetchTree(REPO, SHA, 'main', {
@@ -86,7 +80,9 @@ describe('fetchTree', () => {
     handler = () =>
       new Response(
         JSON.stringify({
-          tree: [{ path: 'a.txt', type: 'blob' }],
+          fetchedAt: '2026-10-05T00:00:00Z',
+          paths: ['a.txt'],
+          truncated: false,
         }),
       )
     const first = await fetchTree(REPO, SHA, 'main', {
@@ -110,7 +106,14 @@ describe('fetchTree', () => {
 
   it('honours the cache TTL', async () => {
     let now = 1_000_000
-    handler = () => new Response(JSON.stringify({ tree: [{ path: 'a.txt', type: 'blob' }] }))
+    handler = () =>
+      new Response(
+        JSON.stringify({
+          fetchedAt: '2026-10-05T00:00:00Z',
+          paths: ['a.txt'],
+          truncated: false,
+        }),
+      )
     const fetchImpl = async () => {
       calls.push('net')
       return handler('')
@@ -125,8 +128,9 @@ describe('fetchTree', () => {
     handler = () =>
       new Response(
         JSON.stringify({
+          fetchedAt: '2026-10-05T00:00:00Z',
+          paths: ['a.txt'],
           truncated: true,
-          tree: [{ path: 'a.txt', type: 'blob' }],
         }),
       )
     const result = await fetchTree(REPO, SHA, 'main', {
@@ -138,8 +142,8 @@ describe('fetchTree', () => {
     expect(result.error.kind).toBe('truncated')
   })
 
-  it('maps 403 to a friendly rate-limit message', async () => {
-    handler = () => new Response('{}', { status: 403 })
+  it('maps 429 to a friendly rate-limit message', async () => {
+    handler = () => new Response('{}', { status: 429 })
     const result = await fetchTree(REPO, SHA, 'main', {
       fetchImpl: async () => handler(''),
       storage,
@@ -148,8 +152,8 @@ describe('fetchTree', () => {
     if (result.ok) return
     expect(result.error.kind).toBe('http')
     if (result.error.kind !== 'http') return
-    expect(result.error.status).toBe(403)
-    expect(result.error.message).toMatch(/rate-limited/)
+    expect(result.error.status).toBe(429)
+    expect(result.error.message).toMatch(/wait/i)
   })
 
   it('maps 404 to a not-found error', async () => {
@@ -203,7 +207,9 @@ describe('fetchAll', () => {
     handler = () =>
       new Response(
         JSON.stringify({
-          tree: [{ path: 'a.txt', type: 'blob' }],
+          fetchedAt: '2026-10-05T00:00:00Z',
+          paths: ['a.txt'],
+          truncated: false,
         }),
       )
     const result = await fetchAll(inputs, {
@@ -227,7 +233,13 @@ describe('fetchAll', () => {
   it('reports progress and records per-repo errors', async () => {
     handler = (url) => {
       if (url.includes('repo-1')) return new Response('{}', { status: 404 })
-      return new Response(JSON.stringify({ tree: [{ path: 'a.txt', type: 'blob' }] }))
+      return new Response(
+        JSON.stringify({
+          fetchedAt: '2026-10-05T00:00:00Z',
+          paths: ['a.txt'],
+          truncated: false,
+        }),
+      )
     }
     const events: Array<{ done: number; total: number; current: string }> = []
     const result = await fetchAll(

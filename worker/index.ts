@@ -4,6 +4,7 @@ import {
   parseCommitQuery,
   parseCommitsQuery,
   parseReposQuery,
+  parseTreeQuery,
 } from '../shared/api.ts'
 import { ApiErr, badRequest, errorResponse } from './http.ts'
 import { handleActivity } from './routes/activity.ts'
@@ -11,6 +12,7 @@ import { handleCommit } from './routes/commit.ts'
 import { handleCommits } from './routes/commits.ts'
 import { handleRepos } from './routes/repos.ts'
 import { handleStatus } from './routes/status.ts'
+import { handleTree } from './routes/tree.ts'
 
 /** One budget per visitor. IPv6 addresses are grouped by /64, the size of one home network. */
 function visitorKey(request: Request): string {
@@ -64,6 +66,12 @@ async function route(request: Request, env: Env): Promise<Response> {
       if (!params) throw badRequest()
       await limit(env.RL_REST, request)
       return handleCommit(env, params)
+    }
+    case `${API_BASE}/tree`: {
+      const params = parseTreeQuery(url.search)
+      if (!params) throw badRequest()
+      await limit(env.RL_TREE, request)
+      return handleTree(env, params)
     }
     case `${API_BASE}/status`: {
       if (url.search !== '') throw badRequest()

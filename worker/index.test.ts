@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { activityUrl, commitUrl, commitsUrl, reposUrl } from '../shared/api.ts'
+import { activityUrl, commitUrl, commitsUrl, reposUrl, treeUrl } from '../shared/api.ts'
 import { resetGitHubState } from './github.ts'
 import worker from './index.ts'
 
@@ -13,7 +13,7 @@ type Handler = (url: string, init: RequestInit) => Response
 const limiter = (success: boolean): RateLimit => ({ limit: async () => ({ success }) })
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
-  return { GITHUB_TOKEN: TOKEN, RL_GRAPHQL: limiter(true), RL_REST: limiter(true), ...overrides }
+  return { GITHUB_TOKEN: TOKEN, RL_GRAPHQL: limiter(true), RL_REST: limiter(true), RL_TREE: limiter(true), ...overrides }
 }
 
 function quotaBody(remaining = 4000): string {
@@ -426,5 +426,67 @@ describe('/status', () => {
     const { res, body } = await get('/api/v1/status', makeEnv({ GITHUB_TOKEN: '' }))
     expect(res.status).toBe(500)
     expect(body.error.code).toBe('misconfigured')
+  })
+})
+
+describe('/tree', () => {
+  it('sends the token to GitHub and returns cleaned blob paths', async () => {
+    const calls = stubFetch(() =>
+      new Response(
+        JSON.stringify({
+          tree: [
+            { path: 'README.md', type: 'blob' },
+            { path: 'src', type: 'tree' },
+            { path: 'src/main.js', type: 'blob' },
+          ],
+          truncated: false,
+        }),
+      ),
+    )
+    const { res, body } = await get(treeUrl({ repo: 'octocat/hello-world', sha: SHA }))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('public, max-age=0, s-maxage=60')
+    expect(body.paths).toEqual(['README.md', 'src/main.js'])
+    expect(body.truncated).toBe(false)
+
+    const [call] = githubCalls(calls)
+    expect(call.url).toBe(`https://api.github.com/repos/octocat/hello-world/git/trees/${SHA}?recursive=1`)
+    expect(new Headers(call.init.headers).get('authorization')).toBe(`Bearer ${TOKEN}`)
+  })
+
+  it('maps 404 from GitHub to a not-found response with edge caching', async () => {
+    stubFetch(() => new Response('{}', { status: 404 }))
+    const { res, body } = await get(treeUrl({ repo: 'octocat/hello-world', sha: SHA }))
+    expect(res.status).toBe(404)
+    expect(body.error.code).toBe('repo_or_sha_not_found')
+    expect(res.headers.get('cache-control')).toBe('public, max-age=0, s-maxage=60')
+  })
+
+  it('rejects malformed queries with 400 and never calls GitHub', async () => {
+    const calls = stubFetch(() => new Response('{}'))
+    for (const path of [
+      '/api/v1/tree',
+      '/api/v1/tree?repo=Octocat%2FHello-World&sha=' + SHA,
+      '/api/v1/tree?repo=octocat%2Fhello-world',
+      '/api/v1/tree?repo=octocat%2Fhello-world&sha=not-a-sha',
+    ]) {
+      const { res, body } = await get(path)
+      expect(res.status, path).toBe(400)
+      expect(body.error.code).toBe('bad_request')
+    }
+    expect(calls).toHaveLength(0)
+  })
+
+  it('counts against RL_TREE, not RL_REST', async () => {
+    stubFetch(() =>
+      new Response(JSON.stringify({ tree: [{ path: 'a', type: 'blob' }], truncated: false })),
+    )
+    const { res, body } = await get(
+      treeUrl({ repo: 'octocat/hello-world', sha: SHA }),
+      makeEnv({ RL_TREE: limiter(false) }),
+    )
+    expect(res.status).toBe(429)
+    expect(body.error.code).toBe('rate_limited')
+    expect(res.headers.get('retry-after')).toBe('30')
   })
 })

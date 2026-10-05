@@ -1,14 +1,12 @@
-// Fetches the file tree of one repo from GitHub's public, anonymous
-// `git/trees?recursive=1` endpoint. Caches in `sessionStorage` for an
-// hour. The Worker is not involved: this is the user talking to GitHub
-// directly, so the project's shared-token quota reserve is untouched.
-//
-// The endpoint is rate-limited per IP (~60/hr anonymous, 5000/hr when
-// the user is signed into GitHub). The browser carries the user's
-// cookie if they have one, so being signed in is the natural way to
-// raise the limit. The page tells the user this when a tree fetch
-// returns 403.
+// Fetches the file tree of one repo at one commit. The browser does NOT call
+// `api.github.com` directly: that fails with a CORS preflight error on most
+// non-GitHub origins. Instead it calls our Worker at `/api/v1/tree`, which
+// holds the GitHub token, hits `git/trees/{sha}?recursive=1` server-side, and
+// returns just the blob paths. Caching: one `sessionStorage` entry per
+// (repo, sha) for an hour; the Worker also caches the response for 60 s at
+// Cloudflare's edge.
 
+import { treeUrl } from '../../shared/api.ts'
 import type { FileTree } from './types.ts'
 
 const CACHE_PREFIX = 'sirar:tree:'
@@ -23,8 +21,6 @@ export type TreeError =
 export type FetchedTree =
   | { ok: true; tree: FileTree; fromCache: boolean }
   | { ok: false; repo: string; headOid: string; error: TreeError }
-
-const TREE_PATH = (repo: string, sha: string) => `/repos/${repo}/git/trees/${sha}?recursive=1`
 
 const cacheKey = (repo: string, sha: string) => `${CACHE_PREFIX}${repo}@${sha}`
 
@@ -57,23 +53,10 @@ function writeCache(repo: string, sha: string, value: CachedTree, storage: Stora
   }
 }
 
-type RawTree = {
-  sha?: string
+type RawTreeResponse = {
+  fetchedAt?: string
+  paths?: string[]
   truncated?: boolean
-  tree?: Array<{ path?: string; type?: string }>
-  message?: string
-}
-
-function normalize(raw: unknown): { paths: string[]; truncated: boolean } | null {
-  if (!raw || typeof raw !== 'object') return null
-  const r = raw as RawTree
-  if (!Array.isArray(r.tree)) return null
-  const seen = new Set<string>()
-  for (const entry of r.tree) {
-    if (entry.type !== 'blob' || typeof entry.path !== 'string') continue
-    seen.add(entry.path)
-  }
-  return { paths: [...seen].sort(), truncated: r.truncated === true }
 }
 
 export type FetchOptions = {
@@ -87,7 +70,7 @@ export type FetchOptions = {
   now?: () => number
 }
 
-const DEFAULT_BASE = 'https://api.github.com'
+const DEFAULT_BASE = ''
 
 /** Fetches one tree. Returns a discriminated union so the caller can show a real error. */
 export async function fetchTree(
@@ -117,26 +100,14 @@ export async function fetchTree(
 
   let res: Response
   try {
-    res = await fetchImpl(`${baseUrl}${TREE_PATH(repo, headOid)}`, {
-      headers: { accept: 'application/vnd.github+json' },
+    res = await fetchImpl(`${baseUrl}${treeUrl({ repo, sha: headOid })}`, {
+      headers: { accept: 'application/json' },
       signal: AbortSignal.timeout(8000),
     })
   } catch {
-    return { ok: false, repo, headOid, error: { kind: 'network', message: 'Could not reach GitHub.' } }
+    return { ok: false, repo, headOid, error: { kind: 'network', message: 'Could not reach the server.' } }
   }
 
-  if (res.status === 403) {
-    return {
-      ok: false,
-      repo,
-      headOid,
-      error: {
-        kind: 'http',
-        status: 403,
-        message: 'GitHub rate-limited this browser. Sign in to GitHub to raise the limit.',
-      },
-    }
-  }
   if (res.status === 404) {
     return {
       ok: false,
@@ -145,12 +116,20 @@ export async function fetchTree(
       error: { kind: 'http', status: 404, message: 'Repo or commit not found.' },
     }
   }
+  if (res.status === 429) {
+    return {
+      ok: false,
+      repo,
+      headOid,
+      error: { kind: 'http', status: 429, message: 'Too many requests. Please wait a moment.' },
+    }
+  }
   if (!res.ok) {
     return {
       ok: false,
       repo,
       headOid,
-      error: { kind: 'http', status: res.status, message: `GitHub answered ${res.status}.` },
+      error: { kind: 'http', status: res.status, message: `The server answered ${res.status}.` },
     }
   }
 
@@ -162,20 +141,20 @@ export async function fetchTree(
       ok: false,
       repo,
       headOid,
-      error: { kind: 'malformed', message: 'GitHub sent an unreadable answer.' },
+      error: { kind: 'malformed', message: 'The server sent an unreadable answer.' },
     }
   }
 
-  const norm = normalize(body)
-  if (!norm) {
+  const r = body as RawTreeResponse
+  if (!r || !Array.isArray(r.paths)) {
     return {
       ok: false,
       repo,
       headOid,
-      error: { kind: 'malformed', message: 'GitHub response did not look like a tree.' },
+      error: { kind: 'malformed', message: 'The server response did not look like a tree.' },
     }
   }
-  if (norm.truncated) {
+  if (r.truncated === true) {
     return {
       ok: false,
       repo,
@@ -187,11 +166,11 @@ export async function fetchTree(
     }
   }
 
-  const fetchedAt = new Date().toISOString()
-  writeCache(repo, headOid, { branch, fetchedAt, paths: norm.paths }, storage, now())
+  const fetchedAt = typeof r.fetchedAt === 'string' ? r.fetchedAt : new Date().toISOString()
+  writeCache(repo, headOid, { branch, fetchedAt, paths: r.paths }, storage, now())
   return {
     ok: true,
-    tree: { repo, branch, headOid, fetchedAt, paths: norm.paths },
+    tree: { repo, branch, headOid, fetchedAt, paths: r.paths },
     fromCache: false,
   }
 }

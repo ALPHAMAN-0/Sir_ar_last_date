@@ -12,9 +12,14 @@
   // Workers Cache: answers repeated GETs from the edge without running the Worker.
   "cache": { "enabled": true },
   // Per-visitor brakes. Counters are per Cloudflare location and approximate.
+// Each `namespace_id` is provisioned once at
+// https://dash.cloudflare.com → Account Home → Workers → Rate limits,
+// and the id Cloudflare gives is what goes here. On first deploy, `wrangler
+// publish` will fail if any id is missing or wrong.
   "ratelimits": [
     { "name": "RL_GRAPHQL", "namespace_id": "7301", "simple": { "limit": 40, "period": 60 } },
-    { "name": "RL_REST", "namespace_id": "7302", "simple": { "limit": 240, "period": 60 } }
+    { "name": "RL_REST", "namespace_id": "7302", "simple": { "limit": 240, "period": 60 } },
+    { "name": "RL_TREE", "namespace_id": "7303", "simple": { "limit": 40, "period": 60 } }
   ],
   // Deploy fails if the token secret is missing.
   "secrets": { "required": ["GITHUB_TOKEN"] },
