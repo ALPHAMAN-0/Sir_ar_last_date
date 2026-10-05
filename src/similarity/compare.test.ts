@@ -162,3 +162,48 @@ describe('tier', () => {
     expect(tier(1)).toBe('very_similar')
   })
 })
+
+/**
+ * User journey: an instructor uploads a sheet, clicks "Similarity", and the
+ * table shows the right pair at the top, with the right percentage. This test
+ * pins that single user-visible promise end-to-end so a refactor of `compareAll`
+ * can't silently change which pair the UI calls out as the most-similar one.
+ */
+describe('user journey: which two repos match, and by what %', () => {
+  const trees: TreeMap = new Map([
+    [A, tree(A, ['index.html', 'style.css', 'app.js', 'README.md'])],
+    // B is a verbatim copy of A: identical paths -> 100%.
+    [B, tree(B, ['index.html', 'style.css', 'app.js', 'README.md'])],
+    // C overlaps with A on 2 of 6 unique paths -> overlap=2, union=6, score=1/3.
+    [C, tree(C, ['index.html', 'style.css', 'main.go', 'go.mod'])],
+  ])
+
+  it('puts the verbatim-copy pair at the top of the report', () => {
+    const pairs = compareAll(trees).slice().sort((p, q) => q.score - p.score)
+    expect(pairs[0].aKey).toBe(A)
+    expect(pairs[0].bKey).toBe(B)
+    expect(pairs[0].score).toBe(1)
+    expect(pairs[0].shared).toEqual(['README.md', 'app.js', 'index.html', 'style.css'])
+  })
+
+  it('reports the A-C overlap as one-third, not as a copy', () => {
+    const pair = compareAll(trees).find((p) =>
+      (p.aKey === A && p.bKey === C) || (p.aKey === C && p.bKey === A),
+    )
+    expect(pair?.score).toBeCloseTo(1 / 3, 5)
+    expect(pair?.overlap).toBe(2)
+    expect(pair?.union).toBe(6)
+    expect(tier(pair!.score)).toBe('some_overlap')
+  })
+
+  it('lists every unique pair and no duplicates', () => {
+    const pairs = compareAll(trees)
+    expect(pairs).toHaveLength(3) // N=3 -> 3*2/2
+    const keys = pairs.map((p) => [p.aKey, p.bKey].sort().join('|')).sort()
+    expect(keys).toEqual([
+      [A, B].sort().join('|'),
+      [A, C].sort().join('|'),
+      [B, C].sort().join('|'),
+    ])
+  })
+})
