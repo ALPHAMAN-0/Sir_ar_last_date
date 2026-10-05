@@ -7,12 +7,12 @@ type RawTreeEntry = { path?: string; type?: string }
 type RawTree = { tree?: RawTreeEntry[]; truncated?: boolean }
 
 /**
- * Returns just the blob paths of one repo at one commit. Used by the similarity
- * tab on the browser side, which fetches `git/trees/{sha}?recursive=1`
- * anonymously today — the fetch fails from non-GitHub origins because of CORS,
- * so this Worker route is the in-between: same origin for the browser, the
- * Worker's token for the GitHub call. The 60s edge cache keeps the cost
- * negligible for repeat visits to the same sheet.
+ * Returns just the blob paths of one repo at one commit. The browser used to
+ * fetch `git/trees/{sha}?recursive=1` directly, but GitHub's CORS rules reject
+ * the preflight for non-GitHub origins. This route is the in-between: the
+ * browser calls `/api/v1/tree` on its own origin, and the Worker hits GitHub
+ * with the shared token. The 60 s edge cache keeps the cost negligible for
+ * repeat visits to the same sheet.
  */
 export async function handleTree(env: Env, params: TreeParams): Promise<Response> {
   const { owner, name } = splitRepoKey(params.repo)
