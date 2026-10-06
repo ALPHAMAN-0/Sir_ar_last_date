@@ -1,8 +1,8 @@
 // The register's download: a results report as an Excel workbook. Loaded only
 // when the Download button is pressed, because the Excel library is large.
 //
+//   Results          the register as it is on screen: same columns, same order, one row per person
 //   Summary          how many people have each status, at a glance
-//   Results          one row per person, in the order on screen
 //   Needs attention  late, changed, empty, missing and broken rows, with what to do
 //   Same repo        repos that more than one person handed in
 //   Info             when and how the file was made, and what each status means
@@ -17,8 +17,8 @@ export type ExportRow = {
   rowNumber: number
   id: string
   name: string
-  /** The validated repo address, or what the sheet's cell holds when it is not a link. */
-  repoLink: string
+  /** The repo as the page shows it (`owner/name`), or what the sheet's cell holds when it is not a link. */
+  repoName: string
   /** Only set for a validated `https://github.com/owner/name`: these become clickable. */
   repoUrl: string | null
   /** The label as shown on screen. */
@@ -51,7 +51,8 @@ export type ExportInfo = {
 
 export type ResultsReport = { book: XLSX.WorkBook; styles: SheetStyle[] }
 
-const DATE_FORMAT = 'yyyy-mm-dd hh:mm'
+/** "27 Jan 2011, 01:01": how the page writes a date. */
+const DATE_FORMAT = 'dd mmm yyyy, hh:mm'
 const MS_PER_DAY = 86_400_000
 /** Days between Excel's day zero (30 Dec 1899) and 1 Jan 1970. */
 const EXCEL_EPOCH_OFFSET = 25_569
@@ -62,9 +63,9 @@ const text = (value: string): XLSX.CellObject => ({ t: 's', v: value })
 const number = (value: number | null): XLSX.CellObject =>
   value === null ? text('') : { t: 'n', v: value }
 const share = (value: number): XLSX.CellObject => ({ t: 'n', v: value, z: '0%' })
-/** A clickable link, only for an address the app validated itself. */
-const link = (row: ExportRow): XLSX.CellObject =>
-  row.repoUrl ? { t: 's', v: row.repoUrl, l: { Target: row.repoUrl } } : text(row.repoLink)
+/** The repo by name, as on the page. Clickable only for an address the app validated itself. */
+const repo = (row: ExportRow): XLSX.CellObject =>
+  row.repoUrl ? { t: 's', v: row.repoName, l: { Target: row.repoUrl } } : text(row.repoName)
 
 /**
  * A real Excel date (so it sorts and filters as a date) showing the same local
@@ -120,20 +121,24 @@ function table<Row>(
   return { sheet, style: { freezeHeader: true, cells } }
 }
 
+// The register's own columns in the register's own order, so the file reads like
+// the screen. On screen the notes sit under the status; here they get the column
+// next to it, so the Status filter still lists each status once.
 const RESULT_COLUMNS: ReadonlyArray<Column<ExportRow>> = [
   { title: 'Row', width: 6, cell: (row) => number(row.rowNumber) },
   { title: 'ID', width: 16, cell: (row) => text(row.id) },
   { title: 'Name', width: 26, cell: (row) => text(row.name) },
-  { title: 'Repo link', width: 44, cell: link },
+  { title: 'Repo', width: 34, cell: repo },
   { title: 'Status', width: 24, cell: (row) => text(row.status) },
-  { title: 'Late by', width: 12, cell: (row) => text(row.lateBy) },
-  { title: 'Late (minutes)', width: 14, cell: (row) => number(row.lateMinutes) },
   { title: 'Notes', width: 44, cell: (row) => text(row.notes) },
-  { title: 'Repo created', width: 18, cell: (row) => excelDate(row.repoCreatedAt) },
-  { title: 'Last push', width: 18, cell: (row) => excelDate(row.lastPushAt) },
-  { title: 'Last on-time push', width: 18, cell: (row) => excelDate(row.lastOnTimePushAt) },
-  { title: 'Last commit date', width: 18, cell: (row) => excelDate(row.lastCommitAt) },
+  { title: 'Late by', width: 12, cell: (row) => text(row.lateBy) },
+  { title: 'Repo created', width: 21, cell: (row) => excelDate(row.repoCreatedAt) },
+  { title: 'Last push', width: 21, cell: (row) => excelDate(row.lastPushAt) },
+  { title: 'Last commit', width: 21, cell: (row) => excelDate(row.lastCommitAt) },
   { title: 'Commits', width: 10, cell: (row) => number(row.commits) },
+  // What the screen does not show: for sorting by lateness, and for marking the on-time version.
+  { title: 'Late (minutes)', width: 14, cell: (row) => number(row.lateMinutes) },
+  { title: 'Last on-time push', width: 21, cell: (row) => excelDate(row.lastOnTimePushAt) },
   { title: 'Branch', width: 12, cell: (row) => text(row.branch) },
 ]
 
@@ -174,7 +179,7 @@ const ATTENTION_COLUMNS: ReadonlyArray<Column<ExportRow>> = [
   { title: 'Row', width: 6, cell: (row) => number(row.rowNumber) },
   { title: 'ID', width: 16, cell: (row) => text(row.id) },
   { title: 'Name', width: 26, cell: (row) => text(row.name) },
-  { title: 'Repo link', width: 44, cell: link },
+  { title: 'Repo', width: 34, cell: repo },
   { title: 'Status', width: 24, cell: (row) => text(row.status) },
   { title: 'Late by', width: 12, cell: (row) => text(row.lateBy) },
   { title: 'What to do', width: 70, cell: (row) => text(whatToDo(row)) },
@@ -313,7 +318,7 @@ function summarySheet(rows: readonly ExportRow[], info: ExportInfo): { sheet: XL
 
   sheet['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r - 1, c: 2 } })
   // Narrow enough for the whole summary to print on one portrait page.
-  sheet['!cols'] = [{ wch: 38 }, { wch: 18 }, { wch: 32 }]
+  sheet['!cols'] = [{ wch: 38 }, { wch: 21 }, { wch: 32 }]
   return { sheet, style: { cells } }
 }
 
@@ -372,13 +377,14 @@ export function buildWorkbook(rows: readonly ExportRow[], info: ExportInfo): Res
   const same = table(SAME_REPO_COLUMNS, groups)
   if (groups.length === 0) same.sheet.A2 = text('Every repo was handed in by one person only.')
 
+  // The results come first: a file opens on its first sheet.
   const book = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(book, summary.sheet, 'Summary')
   XLSX.utils.book_append_sheet(book, results.sheet, 'Results')
+  XLSX.utils.book_append_sheet(book, summary.sheet, 'Summary')
   XLSX.utils.book_append_sheet(book, attention.sheet, 'Needs attention')
   XLSX.utils.book_append_sheet(book, same.sheet, 'Same repo')
   XLSX.utils.book_append_sheet(book, infoSheet(info), 'Info')
-  return { book, styles: [summary.style, results.style, attention.style, same.style, { cells: new Map() }] }
+  return { book, styles: [results.style, summary.style, attention.style, same.style, { cells: new Map() }] }
 }
 
 /** "results-2026-10-05-2359.xlsx" */

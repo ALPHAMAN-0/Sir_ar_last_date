@@ -145,21 +145,24 @@ after the deadline are marked, even when their own date says otherwise.
 ### The results report
 
 **Download .xlsx** on the Register writes the rows on screen, in the order on
-screen. When a filter or a search is on, the Summary says so ("3 of 15").
+screen. The file opens on the Results sheet, which reads like the register
+itself: the same columns in the same order, the repo by name (`octocat/Hello-World`,
+clickable) and dates written as `27 Jan 2011, 01:01`. When a filter or a search
+is on, the Summary says so ("3 of 15").
 
 | Sheet | One row per | Holds |
 |-------|-------------|-------|
+| Results | person | the register's columns (row, ID, name, repo, status, late by, repo created, last push, last commit, commits) with the notes next to the status, then late in minutes, last on-time push and branch |
 | Summary | status | how many people have it and their share, who needs attention, who shares a repo, the deadline and check time |
-| Results | person | status, how late, notes, dates, commits, branch, and a clickable repo link |
 | Needs attention | late, changed, empty, missing or broken row | the most urgent first, with what to do about each |
 | Same repo | repo handed in by several people | their IDs, names, sheet rows and statuses |
 | Info | | how lateness is judged and what each status means |
 
 On the Results and Needs attention sheets a person's whole row has the colour of
 their status: green on time, yellow changed after the deadline, red late or
-empty, grey missing. Header rows are bold and stay in view while scrolling, and
-every column has a filter button. Dates are real Excel dates; names are plain
-text, never formulas.
+empty, grey missing, and light blue for "Has work" while no deadline is set.
+Header rows are bold and stay in view while scrolling, and every column has a
+filter button. Dates are real Excel dates; names are plain text, never formulas.
 
 ## The similarity check
 
@@ -396,7 +399,7 @@ React, TypeScript and Vite, with the Cloudflare Vite plugin. The Excel library
 
 Every rule that decides something is a pure function with unit tests next to it
 (`*.test.ts`), and every screen has tests that click through it in a simulated
-browser (`*.test.tsx`, jsdom and Testing Library): 378 tests in 32 files. The
+browser (`*.test.tsx`, jsdom and Testing Library): 379 tests in 32 files. The
 tests replace `fetch` with a fake API (`src/test/fakeApi.ts` for the page), so
 they never call GitHub.
 

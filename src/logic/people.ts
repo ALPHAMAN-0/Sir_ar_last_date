@@ -169,7 +169,7 @@ export function toExportRows(people: readonly PersonRow[], deadlinePassed: boole
       rowNumber: row.rowNumber,
       id: row.id,
       name: row.name,
-      repoLink: url || row.rawLink,
+      repoName: meta ? meta.nameWithOwner : row.link.ok ? row.link.key : row.rawLink,
       repoUrl: url || null,
       status: statusLabel(verdict.status, deadlinePassed),
       statusKey: verdict.status,
