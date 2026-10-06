@@ -1548,6 +1548,31 @@ th.is-number .sort {
   overflow-wrap: anywhere;
 }
 
+/* Who had the files first: the cell, and the block that opens above the file lists. */
+.similarity__who {
+  min-width: 9rem;
+}
+.similarity__first {
+  margin-bottom: 0.75rem;
+}
+.similarity__facts {
+  margin: 0 0 0.5rem;
+  padding: 0;
+  list-style: none;
+  font-size: 0.86rem;
+}
+.similarity__facts li {
+  padding: 0.12rem 0;
+}
+.similarity__result {
+  margin: 0;
+  font-size: 0.92rem;
+}
+.similarity__first-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+}
+
 /* Under this width each pair becomes a card, like the register's rows. */
 @media (max-width: 52rem) {
   .similarity__table thead {

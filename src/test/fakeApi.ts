@@ -61,7 +61,9 @@ export type FakeApi = {
   commits: Record<string, CommitInfo[] | Failure>
   /** Changed files by commit id; later pages under `${sha}#${page}`. */
   files: Record<string, CommitFilesResponse | Failure>
-  /** File lists by repo. */
+  /** Push events of every branch by repo, oldest first. Without it, the main branch's stand in. */
+  branches: Record<string, ActivityEvent[]>
+  /** File lists by repo, or by `${repo}@${commit}` for the files at an older commit. */
   trees: Record<string, TreeFile[] | Failure>
   /** The quota answer. Null answers 404, which the page quietly ignores. */
   status: StatusResponse | null
@@ -82,6 +84,7 @@ export function stubApi(data: Partial<FakeApi> = {}) {
   const api: FakeApi = {
     repos: {},
     activity: {},
+    branches: {},
     commits: {},
     files: {},
     trees: {},
@@ -101,6 +104,9 @@ export function stubApi(data: Partial<FakeApi> = {}) {
       case '/api/v1/status':
         return answer(api.status ?? undefined, (status: StatusResponse) => status)
       case '/api/v1/activity':
+        if (!query.has('ref') && api.branches[repo]) {
+          return json(200, { fetchedAt: FETCHED_AT, settled: true, events: api.branches[repo], next: null })
+        }
         return answer(api.activity[repo] ?? [], (events: ActivityEvent[]) => ({
           fetchedAt: FETCHED_AT,
           settled: true,
@@ -116,7 +122,11 @@ export function stubApi(data: Partial<FakeApi> = {}) {
         return answer(api.files[page ? `${sha}#${page}` : sha], (files: CommitFilesResponse) => files)
       }
       case '/api/v1/tree':
-        return answer(api.trees[repo], (files: TreeFile[]) => ({ files, dirs: [], tooLarge: false }))
+        return answer(api.trees[`${repo}@${query.get('sha')}`] ?? api.trees[repo], (files: TreeFile[]) => ({
+          files,
+          dirs: [],
+          tooLarge: false,
+        }))
       default:
         return json(404, { error: { code: 'not_found', message: 'No such route.' } })
     }

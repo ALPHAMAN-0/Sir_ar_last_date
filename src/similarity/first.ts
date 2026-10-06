@@ -56,7 +56,7 @@ export type RepoHistory = {
   pushes: Push[]
   /** False when the log has more pushes than were read. */
   logComplete: boolean
-  /** The log begins where the repo began, so "not there before" can be proven. */
+  /** The log begins where the repo began and has no gap, so "not there before" can be proven. */
   startKnown: boolean
   /** How many pushes from the start follow each other without a gap. */
   trusted: number
@@ -188,8 +188,9 @@ export function lastPush(facts: RepoFacts): number {
  *
  * The log is a chain: on every branch, each event starts where the one before
  * ended, and the first one starts from nothing. Where the chain breaks, pushes
- * are missing, and from there on a file that was not seen may still have been
- * there.
+ * are missing. A branch whose beginning is missing may have held any file all
+ * along, so a log with a break proves nothing about what the repo did NOT hold,
+ * at any time.
  */
 export function readLog(
   events: readonly ActivityEvent[],
@@ -217,7 +218,7 @@ export function readLog(
       if (event.before !== (heads.get(event.ref) ?? ZERO_OID)) broken = true
       else {
         heads.set(event.ref, event.after)
-        if (event.ref === mainRef && event.before === ZERO_OID) mainCreated = true
+        if (event.ref === mainRef && event.before === ZERO_OID && event.after !== ZERO_OID) mainCreated = true
       }
     }
     // A deleted branch moves to nothing: there are no files to read.
@@ -231,7 +232,7 @@ export function readLog(
     !facts.isFork &&
     facts.template === null &&
     facts.createdAt >= LOG_KEPT_SINCE &&
-    trusted > 0 &&
+    !broken &&
     mainCreated
   return { pushes, startKnown, trusted }
 }

@@ -4,7 +4,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as XLSX from 'xlsx'
 import type { TreeFile } from '../../shared/api.ts'
+import { formatDateTimeShort } from '../logic/time.ts'
+import { at, repo } from '../test/stories.ts'
 import { analyse } from './compare.ts'
+import { judgePair, pairKey, sharedBlobs } from './first.ts'
+import type { FirstState } from './firstRun.ts'
 import {
   downloadReport,
   MAX_FILES_PER_PAIR,
@@ -67,8 +71,8 @@ function input({ groups, trees, errors = {}, leftOut = [] }: Setup): ReportInput
 }
 
 /** Writes the finished, coloured file and reads it back, as Excel would. */
-function roundTrip(setup: Setup) {
-  const bytes = writeReport(input(setup))
+function roundTrip(setup: Setup, first?: ReportInput['first']) {
+  const bytes = writeReport({ ...input(setup), first })
   const book = XLSX.read(bytes, { type: 'array', cellFormula: true, cellNF: true, cellStyles: true })
   const rows = (name: string) => XLSX.utils.sheet_to_json<unknown[]>(book.Sheets[name], { header: 1, defval: '' })
   return { book, rows, bytes }
@@ -95,6 +99,7 @@ describe('buildReportWorkbook', () => {
   it('has one sheet for each question a teacher asks', () => {
     expect(roundTrip(klass).book.SheetNames).toEqual([
       'Pairs',
+      'Who was first',
       'Matching files',
       'Same repo',
       'People',
@@ -111,6 +116,7 @@ describe('buildReportWorkbook', () => {
       '20-41234-1; 20-41238-1', 'Rahim Uddin; Farhana Akter', 'https://github.com/rahim/task-1',
       '', '(same people as A)', 'https://github.com/rahim/task-1',
       3, 1, 3, 1, 3, 0,
+      '',
       'Handed in by 2 people: the very same repo, so every file is identical',
     ])
     expect(book.Sheets.Pairs.F2.l?.Target).toBe('https://github.com/rahim/task-1')
@@ -122,7 +128,7 @@ describe('buildReportWorkbook', () => {
     expect(header).toEqual([
       'Pair', 'Result', 'Match', 'A ID', 'A name', 'A repo', 'B ID', 'B name', 'B repo',
       'Identical files', 'Share of A', 'A files compared', 'Share of B', 'B files compared',
-      'Same name, other content', 'Note',
+      'Same name, other content', 'Who had it first', 'Note',
     ])
     expect(rows('Pairs')).toHaveLength(3)
     expect(second.slice(0, 2)).toEqual([2, 'Mostly identical'])
@@ -134,7 +140,7 @@ describe('buildReportWorkbook', () => {
       'Karim Hasan',
       'https://github.com/karim/task-1',
     ])
-    expect(second.slice(9)).toEqual([2, 2 / 3, 3, 2 / 3, 3, 1, 'B is a fork'])
+    expect(second.slice(9)).toEqual([2, 2 / 3, 3, 2 / 3, 3, 1, 'Not checked', 'B is a fork'])
     expect(book.Sheets.Pairs.F3.l?.Target).toBe('https://github.com/rahim/task-1')
     expect(book.Sheets.Pairs.I3.l?.Target).toBe('https://github.com/karim/task-1')
   })
@@ -149,7 +155,7 @@ describe('buildReportWorkbook', () => {
     expect(fill('Pairs', 'B3')).toBe('FBE6B3') // Mostly identical
     expect(fill('People', 'K2')).toBe('F6CDC8')
     const zip = XLSX.CFB.read(bytes, { type: 'array' })
-    for (let n = 1; n <= 5; n++) {
+    for (let n = 1; n <= 6; n++) {
       const index = zip.FullPaths.findIndex((path: string) => path.endsWith(`/sheet${n}.xml`))
       expect(new TextDecoder().decode(zip.FileIndex[index].content), `sheet${n}`).toContain('state="frozen"')
     }
@@ -292,10 +298,162 @@ describe('buildReportWorkbook', () => {
       groups: [group('a/x', [who(2, '1', 'A')]), group('b/y', [who(3, '2', 'B')])],
       trees: [tree('a/x', { 'a.js': 'one' }), tree('b/y', { 'b.js': 'two' })],
     })
-    expect(book.SheetNames).toHaveLength(6)
+    expect(book.SheetNames).toHaveLength(7)
     expect(rows('Pairs')).toHaveLength(1)
+    expect(rows('Who was first')).toHaveLength(1)
     expect(rows('Matching files')).toHaveLength(1)
     expect(rows('People')).toHaveLength(3)
+  })
+})
+
+describe('who had the files first', () => {
+  const WORK = { 'app.js': 'the work', 'view.js': 'the view' }
+  /** Rahim pushed the work on 12 September, Karim on the 14th. */
+  const rahim = () =>
+    repo('rahim/task-1', [
+      { at: '02 09:00', files: { 'README.md': 'rahim' } },
+      { at: '12 10:14', files: { 'README.md': 'rahim', ...WORK } },
+    ])
+  const karim = (when = '14 23:51') =>
+    repo('karim/task-1', [
+      { at: '03 09:00', files: { 'README.md': 'karim' } },
+      { at: when, files: { 'README.md': 'karim', ...WORK } },
+    ])
+  const checked = (b = karim()): FirstState => {
+    const a = rahim()
+    return {
+      state: 'ready',
+      evidence: judgePair({
+        a: a.facts,
+        b: b.facts,
+        blobs: sharedBlobs(a.head, b.head, new Set()),
+        aHistory: a.history,
+        bHistory: b.history,
+        aCommits: a.commits,
+        bCommits: b.commits,
+      }),
+    }
+  }
+  const KEY = pairKey('rahim/task-1', 'karim/task-1')
+  const fill = (book: XLSX.WorkBook, sheet: string, address: string) =>
+    (book.Sheets[sheet][address].s as { fgColor?: { rgb?: string } } | undefined)?.fgColor?.rgb
+
+  it('names the first repo on the Pairs sheet, in words that fit the size of the match', () => {
+    const { book, rows } = roundTrip(klass, new Map([[KEY, checked()]]))
+    const [header, sameRepo, pair] = rows('Pairs')
+    const column = header.indexOf('Who had it first')
+    expect(column).toBe(15)
+    // One repo handed in by several people has no direction.
+    expect(sameRepo[column]).toBe('')
+    expect(pair[column]).toBe('A first: B likely copied from A')
+    expect(pair[column + 1]).toBe('B is a fork')
+    expect(fill(book, 'Pairs', 'P3')).toBe('FBE6B3')
+    expect(fill(book, 'Pairs', 'P2')).toBeUndefined()
+  })
+
+  it('says so when a pair was not checked, or not checked to the end', () => {
+    const cell = (first?: ReportInput['first']) => roundTrip(klass, first).rows('Pairs')[2][15]
+    expect(cell()).toBe('Not checked')
+    expect(cell(new Map())).toBe('Not checked')
+    expect(cell(new Map([[KEY, { state: 'waiting' }]]))).toBe('Not checked')
+    expect(cell(new Map([[KEY, { state: 'checking' }]]))).toBe('Not finished when this report was made')
+    expect(cell(new Map([[KEY, checked(karim('12 10:40'))]]))).toBe('Cannot tell')
+    // None of these is a finding, so none gets a row on the sheet of findings.
+    expect(roundTrip(klass, new Map([[KEY, { state: 'checking' }]])).rows('Who was first')).toHaveLength(1)
+  })
+
+  it('writes what was seen about each checked pair on a sheet of its own', () => {
+    process.env.TZ = 'Asia/Dhaka'
+    const { book, rows } = roundTrip(klass, new Map([[KEY, checked()]]))
+    const [header, row] = rows('Who was first')
+    const cells = Object.fromEntries(header.map((title, index) => [title as string, row[index]]))
+    expect(cells).toMatchObject({
+      Pair: 2,
+      'A name': 'Rahim Uddin; Farhana Akter',
+      'B name': 'Karim Hasan',
+      'Had it first': 'A first',
+      Result: 'B likely copied from A',
+      'Decided by': 'Push times',
+      'Later by (hours)': 61.6,
+      'Files shared': 2,
+      'Files A had first': 2,
+      'Files B had first': 0,
+      'Files not decided': 0,
+      'A pushes that brought them': 1,
+      'B pushes that brought them': 1,
+      'A commits': 5,
+      'B commits': 5,
+      "Commits in A by B's account": 0,
+      "Commits in B by A's account": 0,
+      'Commits in both': 0,
+      'Files also in other repos': 0,
+    })
+    const when = (text: string) => formatDateTimeShort(at(text), Date.parse('2026-10-05T17:59:00Z'))
+    expect(cells['What was seen']).toBe(
+      `A pushed them ${when('12 10:14')}; B pushed them ${when('14 23:51')}; B got them 2d 13h later; ` +
+        "A's repo has 5 commits in all, B's has 5",
+    )
+    // Real dates, in the zone the page shows: 10:14 UTC is 16:14 in Dhaka.
+    const sheet = book.Sheets['Who was first']
+    const date = (title: string) =>
+      XLSX.SSF.format('yyyy-mm-dd hh:mm', sheet[XLSX.utils.encode_cell({ r: 1, c: header.indexOf(title) })].v)
+    expect(date('A repo created')).toBe('2026-09-01 14:00')
+    expect(date('A got the files from')).toBe('2026-09-12 16:14')
+    expect(date('A got the files until')).toBe('2026-09-12 16:14')
+    expect(date('B got the files from')).toBe('2026-09-15 05:51')
+    expect(fill(book, 'Who was first', 'D2')).toBe('FBE6B3')
+    expect(fill(book, 'Who was first', 'A1')).toBe('E9E4D6')
+  })
+
+  it('leaves the dates empty when the files were not seen arriving', () => {
+    const fork = judgePair({
+      a: rahim().facts,
+      b: { ...karim().facts, isFork: true, parent: 'rahim/task-1' },
+      blobs: [],
+    })
+    const { rows } = roundTrip(klass, new Map([[KEY, { state: 'ready', evidence: fork }]]))
+    const [header, row] = rows('Who was first')
+    const cell = (title: string) => row[header.indexOf(title)]
+    expect(cell('Decided by')).toBe('GitHub says one is a fork of the other')
+    expect(cell('A got the files from')).toBe('')
+    expect(cell('Later by (hours)')).toBe('')
+    expect(cell("Commits in A by B's account")).toBe('')
+    expect(String(cell('What was seen'))).toMatch(/^B's repo is a GitHub fork of A's repo; /)
+  })
+
+  it('counts the checked pairs on the Info sheet and says what "first" means', () => {
+    const info = (first?: ReportInput['first']) =>
+      new Map(roundTrip(klass, first).rows('Info').map((row) => [row[0] as string, row[1]]))
+    const none = info()
+    expect(none.get('Pairs checked for who had the files first')).toBe(0)
+    expect(none.get('Pairs in which one repo clearly had the files first')).toBe(0)
+    const one = info(new Map([[KEY, checked()]]))
+    expect(one.get('Pairs checked for who had the files first')).toBe(1)
+    expect(one.get('Pairs in which one repo clearly had the files first')).toBe(1)
+    const close = info(new Map([[KEY, checked(karim('12 10:40'))]]))
+    expect(close.get('Pairs checked for who had the files first')).toBe(1)
+    expect(close.get('Pairs in which one repo clearly had the files first')).toBe(0)
+    expect(String(one.get('What "had it first" means'))).toMatch(/not the date written in a commit/)
+    expect(String(one.get('What "had it first" cannot see'))).toMatch(/outside GitHub/)
+  })
+
+  it('never writes a formula into the new sheet either', () => {
+    const { book } = roundTrip(
+      {
+        groups: [
+          group('rahim/task-1', [who(2, '=SUM(A1)', '=HYPERLINK("https://evil.example","click")')]),
+          group('karim/task-1', [who(3, '@id', '+cmd')]),
+        ],
+        trees: [tree('rahim/task-1', work), tree('karim/task-1', work)],
+      },
+      new Map([[KEY, checked()]]),
+    )
+    const sheet = book.Sheets['Who was first']
+    for (const address of Object.keys(sheet)) {
+      if (!address.startsWith('!')) expect(sheet[address].f, address).toBeUndefined()
+    }
+    expect(sheet.B2).toMatchObject({ t: 's', v: '=HYPERLINK("https://evil.example","click")' })
+    expect(sheet.C2).toMatchObject({ t: 's', v: '+cmd' })
   })
 })
 
@@ -319,7 +477,7 @@ describe('downloadReport', () => {
     const [bytes, name] = save.mock.calls[0]
     expect(name).toBe('similarity-2026-10-05-2359.xlsx')
     expect(XLSX.read(bytes, { type: 'array' }).SheetNames).toEqual([
-      'Pairs', 'Matching files', 'Same repo', 'People', 'Starter files', 'Info',
+      'Pairs', 'Who was first', 'Matching files', 'Same repo', 'People', 'Starter files', 'Info',
     ])
   })
 })

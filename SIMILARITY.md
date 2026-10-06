@@ -416,6 +416,23 @@ questions** section at the bottom.
 5. **Branches: only default branch, or every branch?** Default-only
    keeps it cheap. Multi-branch would require N more tree calls per
    repo.
+6. ~~**Who copied from whom?**~~ Answered in iteration 9: the page shows
+   who had the shared files on GitHub first, from the push log and the
+   files at each pushed commit, and names a repo only when that is clear.
+7. **A direction between two copies of one starter repo.** Two forks of
+   the same repo, or two repos made from one template, read "Same
+   source" today. To rank them, the files each copy started with would
+   have to be read (the commit its first push sits on) and the starter
+   repo itself, so that what came from there is not counted.
+8. **A shortcut that was tried and dropped.** To read fewer file lists,
+   iteration 9 first planned a binary search over a repo's pushes for
+   the push that brought a file, plus one look at the other repo at
+   that moment. It is wrong: B pushes a file, removes it, A pushes the
+   same file, B puts it back. The search finds B's second arrival, B
+   did not hold the file when A pushed, and A is called first. "Had it"
+   is proven by one look; "did not have it before" needs every earlier
+   state. So the pushes are read oldest first, and reading stops once
+   every shared file has been seen.
 
 ---
 
@@ -532,3 +549,55 @@ Update this on every change to the plan.
     6,232 files, and 55 forks of one repo), on the dev server and on
     the production build with its security policy. The downloaded
     workbook opens in LibreOffice. 233 tests pass; lint and build clean.
+- **2026-10-07, iteration 9**: the checker now says who had the files
+  first. Detection is unchanged: two files match when their content is
+  identical, and only then.
+
+  What was decided with the user first:
+  - No comparison of edited copies. "Exact copies only" was chosen over
+    a token-level comparison.
+  - Evidence first, then a likely copier, and "Cannot tell" whenever the
+    evidence does not prove a direction. A wrong accusation is the
+    failure to avoid.
+  - Students make their own repos, so forks and template copies get a
+    plain, safe answer and no special handling.
+
+  What changed:
+  - `worker/queries.ts` asks for `parent` and `templateRepository`;
+    `RepoOk` carries them as `parent` and `template`. Checked against
+    GitHub's published schema. No new route: the push log and the file
+    list at any commit were already there.
+  - New `src/similarity/first.ts` (pure). `readLog` puts the push log of
+    all branches in order and counts how far it is an unbroken chain;
+    the start of a repo counts as known only for a repo created since
+    2024 that is no fork and no template copy and whose main branch is
+    seen being created. `arrivalOf` gives, per file and repo, an
+    interval "not before / by". `judgePair` names a repo as first only
+    when it leads by more than an hour on at least half of the shared
+    files, no third repo of the sheet may have had them earlier, and
+    none of three signs points the other way: earlier versions in the
+    later repo, the later owner's commits in the earlier repo, or the
+    later repo's own commits dated before the earlier one had the files.
+  - New `history.ts`: reads the log (two pages at most) and the
+    unfiltered file list at each pushed commit, oldest first, and stops
+    when every shared file has been seen. It never fails; what could not
+    be read is part of the answer.
+  - New `firstRun.ts`: pairs that are partly identical or more are
+    checked by themselves, weaker ones when their row is opened; a repo
+    is read once however many pairs it is in; 300 file lists per run,
+    120 more per opened pair, three repos at a time.
+  - New `firstText.ts` and `components/WhoFirst.tsx`: a "Who had it
+    first" column, and in an opened pair the lines of what was seen, the
+    result, and a fixed note on what the result cannot know. "Likely
+    copied" is said only of a pair that is mostly identical or more.
+  - `report.ts` writes seven sheets: a "Who had it first" column on
+    Pairs and a new "Who was first" sheet with one row per checked pair.
+  - Verified: 20 deliberate breaks of the rules were each caught by a
+    test. The screen was driven in a headless browser with a faked API
+    (named pair, pushes within the hour, weak pair opened, same repo,
+    phone width), and once with real GitHub data: this repo's own 27
+    pushes, read without a token, against a made-up later copy. The
+    page dated 32 shared files to the second and third real push after
+    reading four file lists. The workbook opens in LibreOffice.
+  - Not yet done: a run on the local Worker with a real token, which is
+    the only check of the new `parent` field against GitHub itself.

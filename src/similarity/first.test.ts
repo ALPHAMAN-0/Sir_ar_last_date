@@ -71,7 +71,7 @@ describe('readLog', () => {
     expect(log.trusted).toBe(3)
   })
 
-  it('trusts the log only up to the first gap', () => {
+  it('proves nothing about "not there before" once the log has a gap', () => {
     const log = readLog(
       [
         event('02 10:00', ZERO_OID, id('1')),
@@ -83,7 +83,8 @@ describe('readLog', () => {
       f,
     )
     expect(log.pushes).toHaveLength(4)
-    expect(log).toMatchObject({ trusted: 2, startKnown: true })
+    // A branch whose beginning is missing may have held anything all along.
+    expect(log).toMatchObject({ trusted: 2, startKnown: false })
   })
 
   it('does not know the start of a log that begins in the middle', () => {
@@ -292,6 +293,17 @@ describe('judgePair: push times', () => {
       { at: '14 23:51', files: { ...README_B, ...WORK } },
     ])
     expect(b.history).toMatchObject({ trusted: 0, startKnown: false })
+    expect(judge(author(), b)).toMatchObject({ verdict: 'unknown', reason: 'not_observed' })
+  })
+
+  it('never proves a repo later when its log has a gap anywhere', () => {
+    const b = repo('b/app', [
+      { at: '03 09:00', files: README_B },
+      { at: '14 23:51', files: { ...README_B, ...WORK } },
+      // A side branch shows up that the log never saw being created.
+      { at: '20 09:00', files: { ...README_B, ...WORK }, ref: 'old-work', before: id('never logged') },
+    ])
+    expect(b.history).toMatchObject({ trusted: 2, startKnown: false })
     expect(judge(author(), b)).toMatchObject({ verdict: 'unknown', reason: 'not_observed' })
   })
 

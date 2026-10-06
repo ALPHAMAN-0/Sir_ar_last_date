@@ -31,8 +31,17 @@ rewrite (deployed 2026-10-06, version 4f73fa07).
       answers a repeat (`cf-cache-status: HIT`), `/api/v1/tree` works, an uncached
       request from another site gets 403, and the token is in no response and no
       built file.
+- [x] Similarity, "who had it first" (2026-10-07): for each pair, which repo had the
+      shared files on GitHub first, from the push log and the files at each pushed
+      commit; a repo is named only when that is clear, otherwise "Cannot tell". New
+      column, evidence in the opened pair, and a seventh sheet in the report (see README).
+      Checked in a headless browser with a faked API and with this repo's real push log.
 
 ## Not done
+- [ ] Run "who had it first" once on the local Worker with a real token. Everything
+      else was checked without one; this is the only check of the new `parent` and
+      `templateRepository` fields against GitHub itself (their names were checked
+      against GitHub's published schema).
 - [ ] The per-visitor rate limiter did not trigger on the live site: 107 different
       `/repos` requests from one address in under a minute (limit 40) all got 200.
       Cloudflare calls the limiter "permissive, eventually consistent", but 2.7x is
@@ -44,7 +53,10 @@ rewrite (deployed 2026-10-06, version 4f73fa07).
 - [ ] Choose a license if the repo is or becomes public.
 
 ### Later, by choice
-- Similarity: token-level comparison for edited copies, a "starter repo" field,
-  comparing the commit at the deadline (see "Open questions" in SIMILARITY.md).
+- Similarity: a "starter repo" field, comparing the commit at the deadline, a
+  direction between two forks of one starter repo, and reading on past 40 pushes
+  for a repo that grew slowly (see "Open questions" in SIMILARITY.md). A
+  token-level comparison for edited copies was considered on 2026-10-07 and
+  decided against.
 - By-date screen across all people, inline diff viewer, fork-aware logic,
   per-row deadlines, access code, private repos, auto-deploy on push.

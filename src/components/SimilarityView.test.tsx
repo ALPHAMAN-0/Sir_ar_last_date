@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TreeFile } from '../../shared/api.ts'
 import { analyse } from '../similarity/compare.ts'
 import type { CompareRequest } from '../similarity/compare.worker.ts'
-import { failure, okRepo, oid, saveSheet, stubApi, type RowCells } from '../test/fakeApi.ts'
+import { formatDateTimeShort } from '../logic/time.ts'
+import { FIRST_NOTE } from '../similarity/firstText.ts'
+import { failure, okRepo, oid, saveSheet, stubApi, type FakeApi, type RowCells } from '../test/fakeApi.ts'
+import { at, repo, type Files, type Repo } from '../test/stories.ts'
 
 /** A file whose content hash is the same wherever `content` is the same. */
 const file = (path: string, content: string, size: number): TreeFile => ({ path, sha: oid(content), size })
@@ -85,15 +88,21 @@ async function openSimilarity() {
 
 const summaryLine = () => screen.findByText(/compared, which makes/)
 const pairRows = () => within(screen.getByRole('table')).getAllByRole('row').slice(1)
-/** A pair row as [repo A, repo B, match, identical, of A, of B]. A same-repo row has no second link. */
+/**
+ * A pair row as [repo A, repo B, match, identical, of A, of B]. A same-repo row has no second link.
+ * The "who had it first" cell is left out here: it fills in later, and has tests of its own below.
+ */
 const pairLine = (row: HTMLElement) => {
-  const [a, b, ...numbers] = within(row).getAllByRole('cell')
+  const [a, b, match, , ...numbers] = within(row).getAllByRole('cell')
   return [
     within(a).getByRole('link').textContent,
     within(b).queryByRole('link')?.textContent ?? b.textContent,
-    ...numbers.slice(0, 4).map((cell) => cell.textContent),
+    match.textContent,
+    ...numbers.slice(0, 3).map((cell) => cell.textContent),
   ]
 }
+/** The "who had it first" cell of a pair row. */
+const whoCell = (row: HTMLElement) => within(row).getAllByRole('cell')[3]
 const ALL_PAIRS =
   '4 matches found: 1 repo handed in by more than one person (100%) and 3 pairs of different repos with ' +
   'identical files. 3 repos compared, which makes 3 pairs.'
@@ -265,5 +274,151 @@ describe('SimilarityView', () => {
       screen.getByText('There is nothing to compare: no row of this sheet leads to a repo with files.'),
     ).toBeTruthy()
     expect(asked).toEqual([])
+  })
+})
+
+describe('who had it first', () => {
+  const README = (who: string): Files => ({ 'README.md': `readme of ${who}` })
+  /** Three files: enough to be more than "a small file or two". */
+  const WORK: Files = { 'src/app.js': 'the app', 'src/util.js': 'the helpers', 'src/view.js': 'the view' }
+  /** A repo that got its README on 2 September and the work at `when`. */
+  const student = (name: string, when: string, work: Files = WORK) =>
+    repo(name, [
+      { at: '02 09:00', files: README(name) },
+      { at: when, files: { ...README(name), ...work } },
+    ])
+  const when = (text: string) => formatDateTimeShort(at(text))
+
+  /** Everything the Worker would say about these repos: facts, files at every push, push log, commits. */
+  function serve(stories: Repo[], over: Partial<FakeApi> = {}) {
+    const data = { repos: {}, trees: {}, branches: {}, commits: {} } as Pick<FakeApi, 'repos' | 'trees' | 'branches' | 'commits'>
+    for (const story of stories) {
+      const key = story.facts.repo
+      data.repos[key] = okRepo(key)
+      data.trees[key] = story.head.files
+      for (const [commit, files] of story.snapshots) data.trees[`${key}@${commit}`] = files
+      data.branches[key] = story.events
+      data.commits[key] = [...story.commits.commits]
+    }
+    fake = stubApi({ ...data, ...over })
+  }
+  const TWO: RowCells[] = [
+    ['22-46001-1', 'Rahim Uddin', 'github.com/a/app'],
+    ['22-46002-1', 'Karim Hasan', 'github.com/b/app'],
+  ]
+  const evidence = () =>
+    screen.getByRole('heading', { name: 'Who had these files on GitHub first?' }).parentElement as HTMLElement
+  const lines = () => within(evidence()).getAllByRole('listitem').map((item) => item.textContent)
+  const result = () => within(evidence()).getByText('Result:').parentElement?.textContent
+
+  it('names the repo that pushed the files first, and shows how it knows', async () => {
+    saveSheet(TWO)
+    serve([student('a/app', '12 10:14'), student('b/app', '14 23:51')])
+    await openSimilarity()
+    await summaryLine()
+    expect(screen.getByRole('columnheader', { name: 'Who had it first' })).toBeTruthy()
+    const row = pairRows()[0]
+    await waitFor(() => expect(whoCell(row).textContent).toBe('A firstB likely copied from A'))
+    // Nothing is left of the progress line once every repo was read.
+    expect(screen.queryByText(/Checking who had the files first/)).toBeNull()
+
+    fireEvent.click(within(row).getByRole('button', { name: 'Show files' }))
+    expect(lines()).toEqual([
+      `A pushed them ${when('12 10:14')}`,
+      `B pushed them ${when('14 23:51')}`,
+      'B got them 2d 13h later',
+      "A's repo has 5 commits in all, B's has 5",
+    ])
+    expect(result()).toBe('Result: B likely copied from A')
+    expect(within(evidence()).getByText(FIRST_NOTE)).toBeTruthy()
+    // The files of the pair are still listed below.
+    expect(screen.getByRole('heading', { name: 'Identical content (3)' })).toBeTruthy()
+  })
+
+  it('reads each repo once: its push log, the files at each push, its commits', async () => {
+    saveSheet(TWO)
+    serve([student('a/app', '12 10:14'), student('b/app', '14 23:51')])
+    await openSimilarity()
+    await summaryLine()
+    await waitFor(() => expect(whoCell(pairRows()[0]).textContent).toMatch(/^A first/))
+    const requests = fake.fetch.mock.calls.map(([input]) => String(input))
+    const count = (part: string) => requests.filter((url) => url.includes(part)).length
+    expect(count('/api/v1/activity?')).toBe(2)
+    expect(count('dir=asc')).toBe(2)
+    expect(count('/api/v1/commits?')).toBe(2)
+    // One file list per repo for the comparison, then two per repo to look back in time.
+    expect(count('/api/v1/tree?')).toBe(6)
+    expect(requests).toHaveLength(new Set(requests).size)
+  })
+
+  it('does not name anyone when the two pushed within the hour', async () => {
+    saveSheet(TWO)
+    serve([student('a/app', '12 10:14'), student('b/app', '12 10:40')])
+    await openSimilarity()
+    await summaryLine()
+    const row = pairRows()[0]
+    await waitFor(() => expect(whoCell(row).textContent).toBe('Cannot tell'))
+    fireEvent.click(within(row).getByRole('button', { name: 'Show files' }))
+    expect(result()).toBe('Result: Cannot tell. The two pushed these files within an hour of each other.')
+    expect(within(evidence()).queryByText(FIRST_NOTE)).toBeNull()
+  })
+
+  it('checks a weak pair only when its row is opened', async () => {
+    const note: Files = { 'notes.md': 'the same note' }
+    const own = (who: string): Files => ({ [`${who}1.js`]: `${who} one`, [`${who}2.js`]: `${who} two` })
+    saveSheet(TWO)
+    serve([student('a/app', '05 09:00', { ...note, ...own('a') }), student('b/app', '09 09:00', { ...note, ...own('b') })])
+    await openSimilarity()
+    await summaryLine()
+    const row = pairRows()[0]
+    await waitFor(() => expect(whoCell(row).textContent).toBe('Open to check'))
+    expect(fake.fetch.mock.calls.some(([input]) => String(input).includes('/api/v1/activity?repo=a%2Fapp'))).toBe(false)
+
+    fireEvent.click(within(row).getByRole('button', { name: 'Show files' }))
+    // One small shared file is not called a copy: the result stays with what was seen.
+    await waitFor(() => expect(whoCell(row).textContent).toBe('A firstA had these files first'))
+    expect(result()).toBe('Result: A had these files first')
+  })
+
+  it('has nothing to say about a repo handed in by several people', async () => {
+    saveSheet([...TWO, ['22-46003-1', 'Salma Akter', 'https://github.com/a/app']])
+    serve([student('a/app', '12 10:14'), student('b/app', '14 23:51')])
+    await openSimilarity()
+    await summaryLine()
+    const [sameRepo, pair] = pairRows()
+    await waitFor(() => expect(whoCell(pair).textContent).toMatch(/^A first/))
+    expect(whoCell(sameRepo).textContent).toBe('–')
+    fireEvent.click(within(sameRepo).getByRole('button', { name: 'Show files' }))
+    expect(screen.queryByRole('heading', { name: 'Who had these files on GitHub first?' })).toBeNull()
+  })
+
+  it('reads a push log that could not be loaded as "cannot tell", never as a finding', async () => {
+    saveSheet(TWO)
+    serve([student('a/app', '12 10:14'), student('b/app', '14 23:51')], {
+      branches: { 'a/app': student('a/app', '12 10:14').events },
+      activity: { 'b/app': failure(404, 'repo_not_found', 'This repo was not found.') },
+    })
+    await openSimilarity()
+    await summaryLine()
+    const row = pairRows()[0]
+    await waitFor(() => expect(whoCell(row).textContent).toBe('Cannot tell'))
+    fireEvent.click(within(row).getByRole('button', { name: 'Show files' }))
+    expect(lines()).toContain("The push log of B's repo could not be loaded")
+    expect(result()).toBe('Result: Cannot tell. GitHub does not show enough of what happened.')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('takes a GitHub fork of the other repo as decided', async () => {
+    saveSheet(TWO)
+    serve([student('a/app', '12 10:14'), student('b/app', '14 23:51')])
+    fake.api.repos['b/app'] = okRepo('b/app', { isFork: true, parent: 'a/app' })
+    await openSimilarity()
+    await summaryLine()
+    const row = pairRows()[0]
+    await waitFor(() => expect(whoCell(row).textContent).toBe('A firstB likely copied from A'))
+    // The repos' own facts settle it: no push log is asked for.
+    expect(fake.fetch.mock.calls.some(([input]) => String(input).includes('/api/v1/activity'))).toBe(false)
+    fireEvent.click(within(row).getByRole('button', { name: 'Show files' }))
+    expect(lines()[0]).toBe("B's repo is a GitHub fork of A's repo")
   })
 })

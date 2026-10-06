@@ -8,6 +8,9 @@ import * as XLSX from 'xlsx'
 import { repoUrl } from '../logic/people.ts'
 import { headerCells, saveFile, writeStyledXlsx, type Paint, type SheetStyle } from '../sheet/xlsxStyle.ts'
 import { pairDetail, sharedSets } from './compare.ts'
+import { pairKey, type PairEvidence } from './first.ts'
+import type { FirstState, FirstStates } from './firstRun.ts'
+import { FIRST_NOTE, evidenceLines, firstLabel, firstTone, isNamed, resultLine } from './firstText.ts'
 import { tierLabel, tierTone } from './format.ts'
 import { MIN_BYTES } from './rules.ts'
 import type { RepoGroup } from './run.ts'
@@ -19,6 +22,8 @@ export type ReportInput = {
   analysis: Analysis
   /** The compared file lists, by repo. Needed to name the matching files. */
   trees: ReadonlyMap<string, RepoFiles>
+  /** Who had the files first, by pair, as far as it was checked. */
+  first?: FirstStates
   info: {
     /** The uploaded file. */
     fileName: string
@@ -57,7 +62,8 @@ const repoLink = (repo: string | null): XLSX.CellObject => {
 }
 
 /** A real Excel date showing the same local wall-clock time the page shows. */
-function excelDate(instant: number): XLSX.CellObject {
+function excelDate(instant: number | null): XLSX.CellObject {
+  if (instant === null) return text('')
   const date = new Date(instant)
   if (Number.isNaN(date.getTime())) return text('')
   const localMs = date.getTime() - date.getTimezoneOffset() * 60_000
@@ -110,6 +116,39 @@ function pairNote({ kind, summary, a, b }: PairRow): string {
   return notes.join('; ')
 }
 
+/** What is known about who had the files of this pair first. Nothing for one repo handed in by several. */
+const firstOf = (first: FirstStates | undefined, row: PairRow): FirstState | undefined =>
+  row.kind === 'repos' ? first?.get(pairKey(row.summary.aKey, row.summary.bKey)) : undefined
+
+const NOT_CHECKED = 'Not checked'
+const NOT_FINISHED = 'Not finished when this report was made'
+
+/** The Pairs sheet's one cell on the question; the "Who was first" sheet has the rest. */
+function firstText(row: PairRow, state: FirstState | undefined): string {
+  if (row.kind === 'same_repo') return ''
+  if (!state || state.state === 'waiting') return NOT_CHECKED
+  if (state.state === 'checking') return NOT_FINISHED
+  const label = firstLabel(state)
+  return isNamed(state.evidence) ? `${label}: ${resultLine(state.evidence, row.summary.tier)}` : label
+}
+
+const firstColumn = (first: FirstStates | undefined): Column<PairRow> => ({
+  title: 'Who had it first',
+  width: 36,
+  cell: (row) => text(firstText(row, firstOf(first, row))),
+  paint: (row) => {
+    const state = firstOf(first, row)
+    return state?.state === 'ready' ? firstTone(state) : null
+  },
+})
+
+/** The Pairs sheet: its fixed columns, with "who had it first" just before the note. */
+const pairColumns = (first: FirstStates | undefined): Array<Column<PairRow>> => [
+  ...PAIR_COLUMNS.slice(0, -1),
+  firstColumn(first),
+  ...PAIR_COLUMNS.slice(-1),
+]
+
 const PAIR_COLUMNS: ReadonlyArray<Column<PairRow>> = [
   { title: 'Pair', width: 6, cell: (row) => number(row.number) },
   { title: 'Result', width: 22, cell: (row) => text(tierLabel(row.summary.tier)), paint: resultPaint },
@@ -129,6 +168,71 @@ const PAIR_COLUMNS: ReadonlyArray<Column<PairRow>> = [
   { title: 'Same name, other content', width: 24, cell: (row) => number(row.summary.sameName) },
   { title: 'Note', width: 44, cell: (row) => text(pairNote(row)) },
 ]
+
+/** One checked pair of different repos, for the "Who was first" sheet. */
+type FirstRow = { row: PairRow; evidence: PairEvidence; state: FirstState; checkedAt: number }
+
+const BASIS_TEXT = {
+  fork: 'GitHub says one is a fork of the other',
+  created_after: 'One repo did not exist yet',
+  push_times: 'Push times',
+} as const
+
+const HOUR_MS = 3_600_000
+
+const FIRST_COLUMNS: ReadonlyArray<Column<FirstRow>> = [
+  { title: 'Pair', width: 6, cell: ({ row }) => number(row.number) },
+  { title: 'A name', width: 24, cell: ({ row }) => text(names(row.a)) },
+  { title: 'B name', width: 24, cell: ({ row }) => text(names(row.b)) },
+  {
+    title: 'Had it first',
+    width: 20,
+    cell: ({ state }) => text(firstLabel(state)),
+    paint: ({ state }) => firstTone(state),
+  },
+  { title: 'Result', width: 60, cell: ({ row, evidence }) => text(resultLine(evidence, row.summary.tier)) },
+  { title: 'Decided by', width: 34, cell: ({ evidence }) => text(evidence.basis ? BASIS_TEXT[evidence.basis] : '') },
+  { title: 'A repo created', width: 17, cell: ({ evidence }) => excelDate(evidence.a.createdAt) },
+  { title: 'A got the files from', width: 19, cell: ({ evidence }) => excelDate(evidence.a.firstAt) },
+  { title: 'A got the files until', width: 19, cell: ({ evidence }) => excelDate(evidence.a.lastAt) },
+  { title: 'B repo created', width: 17, cell: ({ evidence }) => excelDate(evidence.b.createdAt) },
+  { title: 'B got the files from', width: 19, cell: ({ evidence }) => excelDate(evidence.b.firstAt) },
+  { title: 'B got the files until', width: 19, cell: ({ evidence }) => excelDate(evidence.b.lastAt) },
+  {
+    title: 'Later by (hours)',
+    width: 15,
+    cell: ({ evidence }) => number(evidence.gapMs === null ? null : Math.round((evidence.gapMs / HOUR_MS) * 10) / 10),
+  },
+  { title: 'Files shared', width: 12, cell: ({ evidence }) => number(evidence.shared) },
+  { title: 'Files A had first', width: 16, cell: ({ evidence }) => number(evidence.a.first) },
+  { title: 'Files B had first', width: 16, cell: ({ evidence }) => number(evidence.b.first) },
+  { title: 'Files not decided', width: 16, cell: ({ evidence }) => number(evidence.undecided) },
+  { title: 'A pushes that brought them', width: 24, cell: ({ evidence }) => number(evidence.a.arrivalPushes) },
+  { title: 'B pushes that brought them', width: 24, cell: ({ evidence }) => number(evidence.b.arrivalPushes) },
+  { title: 'A commits', width: 10, cell: ({ evidence }) => number(evidence.a.totalCommits) },
+  { title: 'B commits', width: 10, cell: ({ evidence }) => number(evidence.b.totalCommits) },
+  { title: "Commits in A by B's account", width: 26, cell: ({ evidence }) => number(evidence.a.commitsByOther) },
+  { title: "Commits in B by A's account", width: 26, cell: ({ evidence }) => number(evidence.b.commitsByOther) },
+  { title: 'Commits in both', width: 15, cell: ({ evidence }) => number(evidence.sharedCommits) },
+  { title: 'Files also in other repos', width: 23, cell: ({ evidence }) => number(evidence.elsewhere) },
+  {
+    title: 'What was seen',
+    width: 120,
+    cell: ({ evidence, checkedAt }) => text(evidenceLines(evidence, checkedAt).join('; ')),
+  },
+]
+
+/** The pairs of different repos that were checked to the end, strongest first. */
+function firstRows(input: ReportInput): FirstRow[] {
+  const rows: FirstRow[] = []
+  for (const row of input.summary.pairs) {
+    const state = firstOf(input.first, row)
+    if (state?.state === 'ready') {
+      rows.push({ row, evidence: state.evidence, state, checkedAt: input.info.checkedAt })
+    }
+  }
+  return rows
+}
 
 type FileRow = {
   pair: number
@@ -251,7 +355,7 @@ const STARTER_COLUMNS: ReadonlyArray<Column<StarterFile>> = [
   { title: 'Size (bytes)', width: 12, cell: (file) => number(file.size) },
 ]
 
-function infoSheet(input: ReportInput, listedFiles: number): XLSX.WorkSheet {
+function infoSheet(input: ReportInput, listedFiles: number, checked: readonly FirstRow[]): XLSX.WorkSheet {
   const { summary, analysis, info } = input
   const repoPairs = summary.pairs.filter((pair) => pair.kind === 'repos')
   const strongPairs = repoPairs.filter(
@@ -273,6 +377,8 @@ function infoSheet(input: ReportInput, listedFiles: number): XLSX.WorkSheet {
     ['Pairs of different repos with identical files', number(repoPairs.length)],
     ['Pairs of different repos mostly identical or more', number(strongPairs)],
     ['Matching files listed', number(listedFiles)],
+    ['Pairs checked for who had the files first', number(checked.length)],
+    ['Pairs in which one repo clearly had the files first', number(checked.filter((row) => isNamed(row.evidence)).length)],
     ['Starter-file limit', number(analysis.commonLimit)],
     ['Starter files left out', number(analysis.starter.length)],
     [
@@ -299,6 +405,16 @@ function infoSheet(input: ReportInput, listedFiles: number): XLSX.WorkSheet {
       'What this cannot see',
       text('A copy in which every file was changed, even by one character. It is a list of places to look, not a verdict: read the files before you decide anything.'),
     ],
+    [
+      'What "had it first" means',
+      text(
+        'The repo that held the shared files on GitHub earlier. The time is the one GitHub recorded when it received each push, not the date written in a commit, which the author can change. A repo is named only when the other one provably got the files more than an hour later and nothing speaks against it; otherwise the answer is "Cannot tell".',
+      ),
+    ],
+    [
+      'What "had it first" cannot see',
+      text(`${FIRST_NOTE} A repo that was deleted and created again looks newer than it is. A pair marked "${NOT_CHECKED}" is checked when its row is opened on the page.`),
+    ],
   ]
   const sheet: XLSX.WorkSheet = {}
   lines.forEach(([label, value], r) => {
@@ -313,6 +429,7 @@ function infoSheet(input: ReportInput, listedFiles: number): XLSX.WorkSheet {
 /**
  * Builds the workbook:
  *   Pairs           one row per pair of repos with identical files, strongest first
+ *   Who was first   for each checked pair: who had the files on GitHub first, and what was seen
  *   Matching files  which files those are
  *   Same repo       repos that more than one person handed in
  *   People          one row per sheet row: compared or not, and the closest match
@@ -321,8 +438,10 @@ function infoSheet(input: ReportInput, listedFiles: number): XLSX.WorkSheet {
  */
 export function buildReport(input: ReportInput): { book: XLSX.WorkBook; styles: SheetStyle[] } {
   const files = fileRows(input)
+  const checked = firstRows(input)
   const tables: Array<[string, Table]> = [
-    ['Pairs', table(PAIR_COLUMNS, input.summary.pairs)],
+    ['Pairs', table(pairColumns(input.first), input.summary.pairs)],
+    ['Who was first', table(FIRST_COLUMNS, checked)],
     ['Matching files', table(FILE_COLUMNS, files)],
     ['Same repo', table(SAME_REPO_COLUMNS, input.summary.sameRepo)],
     ['People', table(PEOPLE_COLUMNS, input.summary.people)],
@@ -331,7 +450,7 @@ export function buildReport(input: ReportInput): { book: XLSX.WorkBook; styles: 
   const book = XLSX.utils.book_new()
   for (const [name, { sheet }] of tables) XLSX.utils.book_append_sheet(book, sheet, name)
   const listed = files.filter((row) => row.kind !== SAME_REPO_LINE).length
-  XLSX.utils.book_append_sheet(book, infoSheet(input, listed), 'Info')
+  XLSX.utils.book_append_sheet(book, infoSheet(input, listed, checked), 'Info')
   return { book, styles: [...tables.map(([, { style }]) => style), { cells: new Map() }] }
 }
 

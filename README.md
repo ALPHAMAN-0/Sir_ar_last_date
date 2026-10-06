@@ -26,7 +26,7 @@ On a shared computer, press Clear when you are done.
 |--------|--------------|
 | **Register** | One row per person: status, how late, repo created, last push, last commit, number of commits. Sort, filter by status, search, and download a results report as `.xlsx`. |
 | **Person** | Open a row to see the commits grouped by date, the files each commit changed, and the deadline drawn across the timeline. |
-| **Similarity** | Which people handed in the very same repo (a 100% match), which different repos hold files with exactly the same content and how much, and a report as `.xlsx`. |
+| **Similarity** | Which people handed in the very same repo (a 100% match), which different repos hold files with exactly the same content and how much, which of the two had those files on GitHub first, and a report as `.xlsx`. |
 
 ## How it fits together
 
@@ -194,8 +194,9 @@ flowchart TD
   G -- yes --> G1["Starter file:<br/>not counted"]
   G -- no --> H["Compare the repos<br/>that share a content<br/>(in a Web Worker)"]
   H --> I["For each pair:<br/>identical files,<br/>share of A, share of B"]
-  I --> J["Table on the screen"]
-  I --> K["Report as .xlsx"]
+  I --> L["Who had those files first:<br/>GitHub's push log and<br/>the files at each push"]
+  L --> J["Table on the screen"]
+  L --> K["Report as .xlsx"]
 ```
 
 ### What is never compared
@@ -246,6 +247,56 @@ renamed), files with the same name but other content, and what each rule left ou
 Open a "Same repo" row to see everyone who handed it in and its files.
 "Same commit in both repos" means one repo is a copy of the other's whole history.
 
+### Who had it first
+
+For each pair the page also looks up **which of the two repos had the shared
+files on GitHub first**. It uses only what GitHub itself recorded:
+
+- the **push log**: the moment GitHub received each push, on every branch. The
+  author cannot change these times. The dates written in commits, they can.
+- the **files at each pushed commit**, read from the oldest push onward until
+  every shared file has been seen.
+
+Because the pushes are read in order and on every branch, a file that was
+removed and put back, or first pushed to a side branch, is still dated by the
+first time it arrived.
+
+| The column says | When |
+|-----------------|------|
+| A first, B first | that repo held the files more than an hour before the other one can have had them, on at least half of the shared files, and nothing in the list below speaks against it |
+| Each had some first | some of the files were in A first, others in B first |
+| Same source | both repos are forks of the same repo or were generated from the same template, or both contain commits that a third account wrote |
+| Cannot tell | everything else; the opened pair says why |
+| Open to check | a weak pair (small part identical, or only a small file or two); it is checked when you open it |
+
+A repo is **never named as the later one** when:
+
+- the two pushed within an hour of each other;
+- GitHub's push log does not show how that repo began: it was created before
+  2024 (GitHub keeps push logs only since 2023), it is a fork or a template
+  copy, or its log has a gap;
+- another repo of the sheet may have had the files before both;
+- that repo held earlier versions of the files, while the other one received
+  them complete;
+- the other repo contains commits written by that repo's owner;
+- the commits that brought the files to that repo are dated before the other
+  repo had them. Its owner may have worked at home and pushed late. Commit
+  dates are used only in this one way: to hold a result back, never to give one;
+- a commit history could not be read.
+
+One case needs no push log: a GitHub fork of the other repo. GitHub itself says
+what it was copied from.
+
+The sentence under a named result depends on the size of the match. For a pair
+that is mostly or almost all identical it reads "B likely copied from A". For a
+weaker match it reads "A had these files first", because a few shared files can
+come from anywhere.
+
+Open a pair to see what was observed: when each repo got the files and in how
+many pushes, whether a file was worked on there before, who wrote the commits,
+and what could not be seen. A repo handed in by several people has no direction
+and shows a dash.
+
 ### What it cannot see
 
 - **A copy in which every file was changed**, even by one character. The hash of
@@ -255,17 +306,28 @@ Open a "Same repo" row to see everyone who handed it in and its files.
   the same project template, its files are not yet "many" and will show as
   identical. The file list of the pair makes this easy to spot.
 - **Private repos**, and branches other than the main one.
+- **What happened outside GitHub.** "Who had it first" knows when a file reached
+  GitHub, not who wrote it. Files passed on by chat or on a stick, both people
+  taking them from a third place, and a repo that was deleted and created again
+  are all invisible to it. That is why a result says "likely", and why every
+  doubt ends in "Cannot tell".
+- **A direction between two copies of one starter repo.** Two forks of the same
+  repo, or two repos made from the same template, read "Same source".
+- **A file that was never at the top of a branch.** "Who had it first" reads
+  the files as they stood after each push. A file that was added and removed
+  again inside one push is in the repo's history but is not seen.
 
 It is a list of places to look, not a verdict. Read the files before you decide
 anything.
 
 ### The report
 
-**Download .xlsx** on the Similarity tab writes a workbook with six sheets.
+**Download .xlsx** on the Similarity tab writes a workbook with seven sheets.
 
 | Sheet | One row per | Holds |
 |-------|-------------|-------|
-| Pairs | repo handed in by several people (first, at 100%), then pair of repos with identical files | result, match, both people and repo links, counts and shares |
+| Pairs | repo handed in by several people (first, at 100%), then pair of repos with identical files | result, match, both people and repo links, counts and shares, who had the files first |
+| Who was first | pair that was checked for it | the result and what decided it, when each repo was created and got the files, how much later, files first on each side, pushes, commits, and every line of what was seen |
 | Matching files | identical file | pair number, path in A, path in B, size |
 | Same repo | repo handed in by several people | their IDs, names and sheet rows |
 | People | row of your sheet | compared or not and why, files compared, closest match with its repo and percentage |
@@ -342,6 +404,10 @@ flowchart TD
 - Each visitor is limited per minute to 40 list requests (repo facts, commit
   lists), 240 detail requests (push logs, changed files) and 120 file lists.
   When a limit is reached the page waits and carries on by itself.
+- "Who had it first" keeps a budget of its own inside the page: at most 200
+  pushes of a repo's log, 40 older file lists per repo, 300 per comparison (120
+  more for each pair you open), and three repos at a time. A pair it could not
+  finish inside the budget says "Open to check".
 - The app stops calling GitHub when fewer than 500 of the token's 5,000 requests
   per hour are left, so the token owner's own tools keep working. The page then
   says when to try again.
@@ -354,6 +420,7 @@ What things cost in GitHub requests:
 | Checking a sheet of 200 people | about 10, plus one for each person who pushed after the deadline |
 | Opening a person | one per commit whose files are shown |
 | Similarity, first time | one per repo; a repo too large to list at once costs a few more (never more than 41) |
+| Who had it first, per repo in a stronger pair | the push log (one, two for more than 100 pushes), the commit list (one per 100 commits), and one file list per push until the shared files have been seen: one or two for a repo that got them in one go, up to 40 for one that grew slowly |
 | Similarity, again | nothing, until someone pushes |
 
 ## The API
@@ -363,7 +430,7 @@ of each query (`shared/api.ts` builds and checks it on both sides).
 
 | Route | Query | Asks GitHub for | Visitor limit | Cached |
 |-------|-------|-----------------|---------------|--------|
-| `/repos` | `r=owner/name`, up to 20, sorted | facts of up to 20 repos in one GraphQL query | 40 / min | 60 s |
+| `/repos` | `r=owner/name`, up to 20, sorted | facts of up to 20 repos in one GraphQL query, including the repo a fork or a template copy comes from | 40 / min | 60 s |
 | `/activity` | `repo`, `v`, optional `ref`, `dir`, `after` | the push log | 240 / min | a day once settled |
 | `/commits` | `repo`, `ref`, optional `after` | 100 commits behind a head commit | 40 / min | a week |
 | `/commit` | `repo`, `sha`, optional `page` | the files one commit changed | 240 / min | a week |
@@ -382,7 +449,7 @@ worker/        the server: talks to GitHub, caches, rate-limits
 src/
   sheet/       reading the Excel file, finding columns, the results report, report colours
   logic/       the status rule, push times, sorting, dates
-  similarity/  rules, file lists, the comparison, the report
+  similarity/  rules, file lists, the comparison, who had the files first, the report
   state/       the store and data loading
   api/         request queue with retries
   components/  the screens
@@ -398,6 +465,10 @@ The similarity code, file by file:
 | `compare.ts` | starter files, identical files per pair, labels |
 | `compare.worker.ts` | runs `compare.ts` off the main thread |
 | `summary.ts` | what the screen and the report both show |
+| `first.ts` | who had a shared file first: the push log's chain, when a file arrived, the rules that name a repo or say "cannot tell" |
+| `history.ts` | loads a repo's push log and the files at each pushed commit, oldest first, until the shared files are seen |
+| `firstRun.ts` | which pairs are checked, each repo read once, the request budget |
+| `firstText.ts` | the words for it, shared by the screen and the report |
 | `report.ts` | the `.xlsx` workbook |
 
 React, TypeScript and Vite, with the Cloudflare Vite plugin. The Excel library
@@ -405,7 +476,7 @@ React, TypeScript and Vite, with the Cloudflare Vite plugin. The Excel library
 
 Every rule that decides something is a pure function with unit tests next to it
 (`*.test.ts`), and every screen has tests that click through it in a simulated
-browser (`*.test.tsx`, jsdom and Testing Library): 400 tests in 33 files. The
+browser (`*.test.tsx`, jsdom and Testing Library): 516 tests in 38 files. The
 tests replace `fetch` with a fake API (`src/test/fakeApi.ts` for the page), so
 they never call GitHub.
 
