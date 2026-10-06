@@ -3,7 +3,7 @@ import type { RepoMeta, RepoOk } from '../../shared/api.ts'
 import { judge } from '../logic/verdict.ts'
 import { parseRepoLink } from '../sheet/parseRepoLink.ts'
 import type { PersonRow } from '../state/store.ts'
-import { groupLabel, personLabel, planComparison } from './run.ts'
+import { groupLabel, personLabel, planComparison, repoFacts } from './run.ts'
 
 const HEAD = 'a'.repeat(40)
 
@@ -99,6 +99,48 @@ describe('planComparison', () => {
 
   it('remembers that a repo is a fork', () => {
     expect(planComparison([person(2, 'github.com/a/one', ok('a/one', { isFork: true }))]).groups[0].isFork).toBe(true)
+  })
+})
+
+describe('repoFacts', () => {
+  it('keeps what GitHub says about each compared repo, once per repo', () => {
+    const facts = repoFacts([
+      person(2, 'github.com/Octocat/Hello', ok('octocat/hello', { nameWithOwner: 'Octocat/Hello', totalCommits: 9 })),
+      person(3, 'github.com/octocat/hello', ok('octocat/hello', { nameWithOwner: 'Octocat/Hello' })),
+      person(4, 'github.com/a/gone', { key: 'a/gone', state: 'not_found' }),
+      person(5, 'github.com/a/empty', ok('a/empty', { isEmpty: true, headOid: null })),
+    ])
+    expect([...facts.keys()]).toEqual(['octocat/hello'])
+    expect(facts.get('octocat/hello')).toEqual({
+      repo: 'octocat/hello',
+      nameWithOwner: 'Octocat/Hello',
+      owner: 'octocat',
+      branch: 'main',
+      headOid: HEAD,
+      createdAt: Date.parse('2026-10-01T00:00:00Z'),
+      pushedAt: Date.parse('2026-10-05T09:05:11Z'),
+      version: '2026-10-05T09:05:11Z',
+      isFork: false,
+      parent: undefined,
+      template: undefined,
+      totalCommits: 9,
+    })
+  })
+
+  it('names a fork\'s parent and a template in lowercase, and tells "none" from "not said"', () => {
+    const facts = repoFacts([
+      person(2, 'github.com/a/fork', ok('a/fork', { isFork: true, parent: 'Teacher/Starter', template: null })),
+      person(3, 'github.com/a/made', ok('a/made', { parent: null, template: 'Teacher/Template' })),
+      person(4, 'github.com/a/old', ok('a/old')),
+    ])
+    expect(facts.get('a/fork')).toMatchObject({ isFork: true, parent: 'teacher/starter', template: null })
+    expect(facts.get('a/made')).toMatchObject({ parent: null, template: 'teacher/template' })
+    expect(facts.get('a/old')?.parent).toBeUndefined()
+  })
+
+  it('uses the creation time as the push-log version of a repo that was never pushed', () => {
+    const facts = repoFacts([person(2, 'github.com/a/one', ok('a/one', { pushedAt: null }))])
+    expect(facts.get('a/one')).toMatchObject({ pushedAt: null, version: '2026-10-01T00:00:00Z' })
   })
 })
 

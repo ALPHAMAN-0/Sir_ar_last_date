@@ -913,6 +913,11 @@ th.is-number .sort {
   margin: 0.15rem 0 0;
   font-size: 0.9rem;
 }
+.facts dd.facts__note {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
 
 .afterline {
   padding: 0.7rem 0.9rem;

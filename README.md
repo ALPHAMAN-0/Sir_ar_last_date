@@ -142,6 +142,12 @@ Open a person to see their commits grouped by date, the files each commit
 changed, and the deadline drawn across the timeline. Commits that reached GitHub
 after the deadline are marked, even when their own date says otherwise.
 
+**First push** on that screen is the moment GitHub received the repo's first
+push; for a fork, the first push from its owner. GitHub has kept push times only
+since March 2023. When the first push is older than that, the screen shows the
+date of the first commit instead and says so, because that date was written on
+the author's own computer.
+
 ### The results report
 
 **Download .xlsx** on the Register writes the rows on screen, in the order on
@@ -399,7 +405,7 @@ React, TypeScript and Vite, with the Cloudflare Vite plugin. The Excel library
 
 Every rule that decides something is a pure function with unit tests next to it
 (`*.test.ts`), and every screen has tests that click through it in a simulated
-browser (`*.test.tsx`, jsdom and Testing Library): 379 tests in 32 files. The
+browser (`*.test.tsx`, jsdom and Testing Library): 400 tests in 33 files. The
 tests replace `fetch` with a fake API (`src/test/fakeApi.ts` for the page), so
 they never call GitHub.
 

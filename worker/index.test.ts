@@ -134,6 +134,8 @@ describe('/repos', () => {
         headOid: SHA,
         headCommittedAt: '2026-09-25T09:05:04Z',
         totalCommits: 38,
+        parent: null,
+        template: null,
       },
     ])
 
@@ -146,6 +148,25 @@ describe('/repos', () => {
     const sent = JSON.parse(String(call.init.body))
     expect(sent.variables).toEqual({ o0: 'octocat', n0: 'hello-world' })
     expect(sent.query).not.toContain('octocat')
+  })
+
+  it('says which repo a fork or a template copy comes from', async () => {
+    const calls = stubFetch(() =>
+      Response.json({
+        data: {
+          r0: { ...repoNode('a/copy'), isFork: true, parent: { nameWithOwner: 'Teacher/Starter' } },
+          r1: { ...repoNode('a/made'), templateRepository: { nameWithOwner: 'Teacher/Template' } },
+          // A fork whose parent the token may not see.
+          r2: { ...repoNode('a/orphan'), isFork: true, parent: null },
+        },
+      }),
+    )
+    const { body } = await get(reposUrl(['a/copy', 'a/made', 'a/orphan']))
+    expect(body.repos.map((repo: { parent: string | null }) => repo.parent)).toEqual(['Teacher/Starter', null, null])
+    expect(body.repos.map((repo: { template: string | null }) => repo.template)).toEqual([null, 'Teacher/Template', null])
+    const sent = JSON.parse(String(githubCalls(calls)[0].init.body))
+    expect(sent.query).toContain('parent { nameWithOwner }')
+    expect(sent.query).toContain('templateRepository { nameWithOwner }')
   })
 
   it('maps NOT_FOUND to not_found and other failures to a retryable error', async () => {

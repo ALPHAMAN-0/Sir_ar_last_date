@@ -76,6 +76,57 @@ export function planComparison(people: readonly PersonRow[]): Plan {
   return { groups: [...groups.values()], inputs, leftOut, waiting }
 }
 
+/** What GitHub says about one compared repo. Read when working out who had a file first. */
+export type RepoFacts = {
+  /** The repo's current `owner/name`, lowercase. */
+  repo: string
+  /** As GitHub spells it, for display. */
+  nameWithOwner: string
+  /** The account the repo belongs to, lowercase. */
+  owner: string
+  branch: string
+  headOid: string
+  createdAt: number
+  pushedAt: number | null
+  /** The `v` of the push-log address, spelled the way the register spells it. */
+  version: string
+  isFork: boolean
+  /** Lowercase `owner/name` of the repo this one was forked from. Null: none, or hidden. Undefined: not said. */
+  parent: string | null | undefined
+  /** Lowercase `owner/name` of the template this repo was generated from. */
+  template: string | null | undefined
+  totalCommits: number
+}
+
+const lower = (name: string | null | undefined) => (typeof name === 'string' ? name.toLowerCase() : name)
+
+/** The facts of every repo that takes part, by repo. Same choice of rows as `planComparison`. */
+export function repoFacts(people: readonly PersonRow[]): Map<string, RepoFacts> {
+  const facts = new Map<string, RepoFacts>()
+  for (const { row, meta } of people) {
+    if (!row.link.ok || !meta || meta.state !== 'ok') continue
+    if (meta.isEmpty || !meta.headOid || !meta.defaultBranch) continue
+    const repo = apiRepoName(meta)
+    if (facts.has(repo)) continue
+    const pushed = meta.pushedAt ? Date.parse(meta.pushedAt) : NaN
+    facts.set(repo, {
+      repo,
+      nameWithOwner: meta.nameWithOwner,
+      owner: repo.slice(0, repo.indexOf('/')),
+      branch: meta.defaultBranch,
+      headOid: meta.headOid,
+      createdAt: Date.parse(meta.createdAt),
+      pushedAt: Number.isNaN(pushed) ? null : pushed,
+      version: meta.pushedAt ?? meta.createdAt,
+      isFork: meta.isFork,
+      parent: lower(meta.parent),
+      template: lower(meta.template),
+      totalCommits: meta.totalCommits,
+    })
+  }
+  return facts
+}
+
 /** "22-46001-1 · Rahim Uddin", or the row number when the sheet gives neither. */
 export function personLabel(person: Person): string {
   return [person.id, person.name].filter(Boolean).join(' · ') || `Row ${person.rowNumber}`

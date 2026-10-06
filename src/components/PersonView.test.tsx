@@ -156,6 +156,33 @@ describe('PersonView', () => {
     await screen.findByRole('link', { name: 'Start late' })
   })
 
+  it('gives the date of the first commit, and says so, when GitHub has no push log', async () => {
+    // Rahim's repo has no push events, like a repo last pushed before GitHub kept them.
+    await openPerson('r2')
+    expect(await screen.findByText('Date of the first commit. The push time is not known.')).toBeTruthy()
+    expect(facts()['First push']).toBe(formatDateTime(at(-700)))
+  })
+
+  it('says that the first push is not known when the commits cannot be loaded either', async () => {
+    const commits = fake.api.commits['octocat/hello-world']
+    fake.api.commits['octocat/hello-world'] = failure(404, 'not_found', 'GitHub could not find this commit.')
+    await openPerson('r2')
+    const alert = await screen.findByRole('alert')
+    await waitFor(() => expect(facts()['First push']).toBe('Not known'))
+
+    fake.api.commits['octocat/hello-world'] = commits
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(facts()['First push']).toBe(formatDateTime(at(-700))))
+  })
+
+  it('says so when the push log could not be loaded', async () => {
+    fake.api.activity['octocat/hello-world'] = failure(404, 'repo_not_found', 'This repo was not found.')
+    await openPerson('r2')
+    await waitFor(() => expect(facts()['First push']).toBe('Could not be loaded'))
+    expect(screen.getByText('On time')).toBeTruthy()
+    await screen.findByRole('link', { name: 'First page' })
+  })
+
   it('explains a link that could not be read, with nothing to load', async () => {
     await openPerson('r5')
     expect(screen.getByText('Invalid link')).toBeTruthy()

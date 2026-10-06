@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ZERO_OID } from '../../shared/validate.ts'
 import { ApiError } from '../api/client.ts'
+import { FIRST_PUSH_BY_COMMIT_NOTE, firstPush, firstPushText } from '../logic/firstPush.ts'
 import {
   filterPeople,
   latenessText,
@@ -136,11 +136,8 @@ export function PersonView({ rowId }: { rowId: string }) {
   const position = order.findIndex((candidate) => candidate.row.rowId === rowId)
   const previous = position > 0 ? order[position - 1] : null
   const next = position >= 0 && position < order.length - 1 ? order[position + 1] : null
-  const oldestPush =
-    activity?.exhausted && !activity.failed
-      ? activity.events.filter((event) => event.after !== ZERO_OID).at(-1)
-      : undefined
-  const firstPushAt = verdict.firstPushAt ?? oldestPush?.ts ?? null
+  // GitHub's push time when it has one. If not, the first commit's date, marked as such.
+  const first = firstPush(person, error ? null : list)
   const linkProblem = verdict.linkProblem ? LINK_PROBLEM_TEXT[verdict.linkProblem] : null
   const notes = noteTexts(person).filter((text) => text !== linkProblem)
 
@@ -199,7 +196,10 @@ export function PersonView({ rowId }: { rowId: string }) {
           </div>
           <div>
             <dt>First push</dt>
-            <dd className="mono">{formatDateTime(firstPushAt) || '—'}</dd>
+            <dd className="mono">{firstPushText(first)}</dd>
+            {first.kind === 'commit_date' ? (
+              <dd className="facts__note">{FIRST_PUSH_BY_COMMIT_NOTE}</dd>
+            ) : null}
           </div>
           {verdict.lastOnTimePushAt ? (
             <div>

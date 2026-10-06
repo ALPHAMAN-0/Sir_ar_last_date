@@ -28,6 +28,13 @@ export type RepoOk = {
   headOid: string | null
   headCommittedAt: string | null
   totalCommits: number
+  /**
+   * The repo this one was forked from, as GitHub spells it. Null when it is no
+   * fork or GitHub hides the parent; missing when an older answer did not say.
+   */
+  parent?: string | null
+  /** The template repo this one was generated from, if any. */
+  template?: string | null
 }
 export type RepoMeta =
   | RepoOk

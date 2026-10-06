@@ -50,27 +50,37 @@ export type TreeLoader = {
   loadAll(inputs: readonly TreeInput[], onProgress?: Progress): Promise<Loaded>
 }
 
+/**
+ * Asks, and asks again while the answer is "too many requests". That answer
+ * pauses the whole queue, so asking again simply waits in it until the pause is
+ * over, and a big class finishes by itself.
+ */
+export async function askPatiently<T>(get: Get, url: string, priority: number): Promise<T> {
+  for (let round = 1; ; round++) {
+    try {
+      return await get<T>(url, priority)
+    } catch (error) {
+      const waitable =
+        error instanceof ApiError &&
+        (error.code === 'rate_limited' || error.code === 'github_throttled')
+      if (!waitable || round >= MAX_ROUNDS) throw error
+    }
+  }
+}
+
+/** One answer of `/api/v1/tree`: the files at a commit, or below one of its folders. */
+export async function askTree(get: Get, url: string, priority: number): Promise<TreeResponse> {
+  const body = await askPatiently<TreeResponse>(get, url, priority)
+  if (!body || !Array.isArray(body.files) || !Array.isArray(body.dirs)) {
+    throw new ApiError(502, 'malformed', 'The server sent an unreadable file list.')
+  }
+  return body
+}
+
 export function createTreeLoader(get: Get): TreeLoader {
   const cache = new Map<string, Promise<RepoFiles>>()
 
-  async function ask(url: string): Promise<TreeResponse> {
-    for (let round = 1; ; round++) {
-      try {
-        const body = await get<TreeResponse>(url, PRIORITY)
-        if (!body || !Array.isArray(body.files) || !Array.isArray(body.dirs)) {
-          throw new ApiError(502, 'malformed', 'The server sent an unreadable file list.')
-        }
-        return body
-      } catch (error) {
-        // "Too many requests" pauses the whole queue. Asking again simply waits
-        // in it until the pause is over, so a big class finishes by itself.
-        const waitable =
-          error instanceof ApiError &&
-          (error.code === 'rate_limited' || error.code === 'github_throttled')
-        if (!waitable || round >= MAX_ROUNDS) throw error
-      }
-    }
-  }
+  const ask = (url: string) => askTree(get, url, PRIORITY)
 
   /**
    * For a repo too big to list at once (usually `node_modules` was committed):

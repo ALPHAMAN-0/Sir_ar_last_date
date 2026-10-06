@@ -38,6 +38,8 @@ export function okRepo(key: string, over: Partial<RepoOk> = {}): RepoOk {
     headOid: oid(key),
     headCommittedAt: '2026-10-01T07:55:00Z',
     totalCommits: 5,
+    parent: null,
+    template: null,
     ...over,
   }
 }
@@ -53,8 +55,8 @@ const isFailure = (value: unknown): value is Failure =>
 export type FakeApi = {
   /** Repo facts by sheet key. A key that is missing answers "not found". */
   repos: Record<string, RepoMeta>
-  /** Push events of the main branch by repo, newest first. */
-  activity: Record<string, ActivityEvent[]>
+  /** Push events of the main branch by repo, newest first. A repo that is missing has none. */
+  activity: Record<string, ActivityEvent[] | Failure>
   /** The commit list behind each repo's head. */
   commits: Record<string, CommitInfo[] | Failure>
   /** Changed files by commit id; later pages under `${sha}#${page}`. */
@@ -98,12 +100,14 @@ export function stubApi(data: Partial<FakeApi> = {}) {
         })
       case '/api/v1/status':
         return answer(api.status ?? undefined, (status: StatusResponse) => status)
-      case '/api/v1/activity': {
-        const events = api.activity[repo] ?? []
-        // The all-branches probe asks oldest first.
-        const ordered = query.get('dir') === 'asc' ? [...events].reverse() : events
-        return json(200, { fetchedAt: FETCHED_AT, settled: true, events: ordered, next: null })
-      }
+      case '/api/v1/activity':
+        return answer(api.activity[repo] ?? [], (events: ActivityEvent[]) => ({
+          fetchedAt: FETCHED_AT,
+          settled: true,
+          // The all-branches probe asks oldest first.
+          events: query.get('dir') === 'asc' ? [...events].reverse() : events,
+          next: null,
+        }))
       case '/api/v1/commits':
         return answer(api.commits[repo], (commits: CommitInfo[]) => ({ commits, next: null }))
       case '/api/v1/commit': {

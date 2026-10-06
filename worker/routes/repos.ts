@@ -11,6 +11,8 @@ type RawRepo = {
   isArchived: boolean
   createdAt: string
   pushedAt: string | null
+  parent?: { nameWithOwner: string } | null
+  templateRepository?: { nameWithOwner: string } | null
   defaultBranchRef: {
     name: string
     target: { oid?: string; committedDate?: string; history?: { totalCount: number } } | null
@@ -32,6 +34,9 @@ function toMeta(key: string, raw: RawRepo): RepoMeta {
     headOid: head?.oid ?? null,
     headCommittedAt: head?.committedDate ?? null,
     totalCommits: head?.history?.totalCount ?? 0,
+    // GitHub hides a parent the token may not see: a fork can have none here.
+    parent: raw.parent?.nameWithOwner ?? null,
+    template: raw.templateRepository?.nameWithOwner ?? null,
   }
 }
 
