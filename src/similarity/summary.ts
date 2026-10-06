@@ -9,6 +9,12 @@ import type { Analysis, PairSummary, RepoFiles, RepoStats, Tier } from './types.
 export type PairRow = {
   /** 1 is the strongest pair. The report's file list refers to pairs by this number. */
   number: number
+  /**
+   * `same_repo`: one repo that several people handed in. `a` and `b` are then the
+   * same group, and the match is 100% whatever the files are.
+   * `repos`: two different repos that hold identical files.
+   */
+  kind: 'same_repo' | 'repos'
   summary: PairSummary
   a: RepoGroup
   b: RepoGroup
@@ -33,13 +39,14 @@ export type PersonLine = {
   stats: RepoStats | null
   /** Files the fixed rules left out. */
   skipped: number | null
-  /** The strongest pair this person's repo is part of. */
-  closest: { label: string; score: number; tier: Tier } | null
+  /** The strongest match of this person: who, in which repo, and how much. */
+  closest: { label: string; repo: string; score: number; tier: Tier } | null
   /** Pairs labelled "almost all" or "mostly" identical. */
   strongPairs: number
 }
 
 export type Summary = {
+  /** Repos handed in by several people first (100%), then pairs of different repos, strongest first. */
   pairs: PairRow[]
   /** Repos that more than one person handed in. */
   sameRepo: RepoGroup[]
@@ -62,7 +69,35 @@ export function nothingLeft(tree: RepoFiles | undefined): string {
 }
 export const ONLY_STARTER = 'Every file is also in many other repos (starter files, or one solution many share)'
 
-const isStrong = (tier: Tier) => tier === 'almost_all' || tier === 'most'
+const isStrong = (tier: Tier) => tier === 'same_repo' || tier === 'almost_all' || tier === 'most'
+
+/** One repo handed in by several people: every file it has is in "both". */
+export function sameRepoSummary(group: RepoGroup, tree: RepoFiles | undefined): PairSummary {
+  const files = tree?.files.length ?? 0
+  const bytes = tree?.files.reduce((sum, file) => sum + file.size, 0) ?? 0
+  return {
+    aKey: group.repo,
+    bKey: group.repo,
+    aIdentical: files,
+    bIdentical: files,
+    identical: files,
+    identicalBytes: bytes,
+    aOwn: files,
+    bOwn: files,
+    aShare: 1,
+    bShare: 1,
+    score: 1,
+    sameName: 0,
+    sameCommit: true,
+    tier: 'same_repo',
+  }
+}
+
+/** "Same repo as 22-46004-1 · Farhana Akter, 22-46007-1 · Arif Rahman +2 more" */
+function sameRepoLabel(group: RepoGroup, person: Person, max = 2): string {
+  const others = group.people.filter((other) => other !== person)
+  return `Same repo as ${groupLabel({ ...group, people: others }, max)}`
+}
 
 export function summarise(plan: Plan, loaded: Loaded, analysis: Analysis): Summary {
   const groups = new Map(plan.groups.map((group) => [group.repo, group]))
@@ -79,18 +114,35 @@ export function summarise(plan: Plan, loaded: Loaded, analysis: Analysis): Summa
     return null
   }
 
-  const pairs: PairRow[] = []
+  const sameRepo = plan.groups
+    .filter((group) => group.people.length > 1)
+    .sort((x, y) => y.people.length - x.people.length || x.repo.localeCompare(y.repo))
+
+  // The same repo handed in twice is the strongest match there is, so it comes first.
+  const pairs: PairRow[] = sameRepo.map((group, index) => ({
+    number: index + 1,
+    kind: 'same_repo',
+    summary: sameRepoSummary(group, loaded.trees.get(group.repo)),
+    a: group,
+    b: group,
+  }))
   const closest = new Map<string, PersonLine['closest']>()
   const strong = new Map<string, number>()
+  for (const group of sameRepo) strong.set(group.repo, 1)
   for (const summary of analysis.pairs) {
     const a = groups.get(summary.aKey)
     const b = groups.get(summary.bKey)
     if (!a || !b) continue
-    pairs.push({ number: pairs.length + 1, summary, a, b })
+    pairs.push({ number: pairs.length + 1, kind: 'repos', summary, a, b })
     for (const [mine, other] of [[a, b], [b, a]] as const) {
       // Pairs arrive strongest first, so the first one seen is the closest.
       if (!closest.has(mine.repo)) {
-        closest.set(mine.repo, { label: groupLabel(other), score: summary.score, tier: summary.tier })
+        closest.set(mine.repo, {
+          label: groupLabel(other),
+          repo: other.repo,
+          score: summary.score,
+          tier: summary.tier,
+        })
       }
       if (isStrong(summary.tier)) strong.set(mine.repo, (strong.get(mine.repo) ?? 0) + 1)
     }
@@ -138,7 +190,10 @@ export function summarise(plan: Plan, loaded: Loaded, analysis: Analysis): Summa
         note: notes.join('; '),
         stats: stats.get(group.repo) ?? null,
         skipped,
-        closest: closest.get(group.repo) ?? null,
+        closest:
+          group.people.length > 1
+            ? { label: sameRepoLabel(group, person), repo: group.repo, score: 1, tier: 'same_repo' }
+            : (closest.get(group.repo) ?? null),
         strongPairs: strong.get(group.repo) ?? 0,
       })
     }
@@ -147,7 +202,7 @@ export function summarise(plan: Plan, loaded: Loaded, analysis: Analysis): Summa
 
   return {
     pairs,
-    sameRepo: plan.groups.filter((group) => group.people.length > 1),
+    sameRepo,
     notCompared,
     people,
     compared,

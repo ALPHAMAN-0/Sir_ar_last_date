@@ -40,7 +40,8 @@ describe('PauseNotice', () => {
   })
 
   it('says when to press Refresh once the shared hourly limit is used up', async () => {
-    const resetAt = '2026-10-06T05:00:00Z'
+    // Always ahead of the clock: a reset time in the past ends the pause at once.
+    const resetAt = new Date(Date.now() + 30 * 60_000).toISOString()
     const store = await setup(503, { code: 'quota_reserved', message: 'Used up.', resetAt })
     await expect(store.client.get(statusUrl())).rejects.toThrow('Used up.')
     expect((await screen.findByRole('status')).textContent).toBe(

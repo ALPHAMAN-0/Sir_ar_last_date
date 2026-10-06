@@ -164,11 +164,16 @@ export function toExportRows(people: readonly PersonRow[], deadlinePassed: boole
     const meta = okMeta(person)
     const { verdict, row } = person
     const hasWork = meta !== null && !meta.isEmpty
+    const url = repoLinkFor(person)
     return {
+      rowNumber: row.rowNumber,
       id: row.id,
       name: row.name,
-      repoLink: repoLinkFor(person) || row.rawLink,
+      repoLink: url || row.rawLink,
+      repoUrl: url || null,
       status: statusLabel(verdict.status, deadlinePassed),
+      statusKey: verdict.status,
+      needsReview: verdict.needsReview,
       lateBy: latenessText(verdict),
       lateMinutes: verdict.lateByMs === null ? null : Math.floor(verdict.lateByMs / 60_000),
       notes: noteTexts(person).join('; '),

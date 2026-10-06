@@ -1,15 +1,15 @@
 // The similarity .xlsx. Like src/sheet/exportXlsx.test.ts, every check is a
 // real round trip: the workbook is written to bytes and read back as Excel would.
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as XLSX from 'xlsx'
 import type { TreeFile } from '../../shared/api.ts'
 import { analyse } from './compare.ts'
 import {
-  buildReportWorkbook,
   downloadReport,
   MAX_FILES_PER_PAIR,
   reportFileName,
+  writeReport,
   type ReportInput,
 } from './report.ts'
 import { noSkips } from './rules.ts'
@@ -66,10 +66,10 @@ function input({ groups, trees, errors = {}, leftOut = [] }: Setup): ReportInput
   }
 }
 
-/** Writes the workbook to bytes and reads it back, as Excel would. */
+/** Writes the finished, coloured file and reads it back, as Excel would. */
 function roundTrip(setup: Setup) {
-  const bytes = XLSX.write(buildReportWorkbook(input(setup)), { type: 'array', bookType: 'xlsx', compression: true })
-  const book = XLSX.read(bytes, { type: 'array', cellFormula: true, cellNF: true })
+  const bytes = writeReport(input(setup))
+  const book = XLSX.read(bytes, { type: 'array', cellFormula: true, cellNF: true, cellStyles: true })
   const rows = (name: string) => XLSX.utils.sheet_to_json<unknown[]>(book.Sheets[name], { header: 1, defval: '' })
   return { book, rows, bytes }
 }
@@ -103,17 +103,30 @@ describe('buildReportWorkbook', () => {
     ])
   })
 
+  it('lists a repo handed in by several people first, as a 100% match', () => {
+    const { book, rows } = roundTrip(klass)
+    const [, first] = rows('Pairs')
+    expect(first).toEqual([
+      1, 'Same repo', 1,
+      '20-41234-1; 20-41238-1', 'Rahim Uddin; Farhana Akter', 'https://github.com/rahim/task-1',
+      '', '(same people as A)', 'https://github.com/rahim/task-1',
+      3, 1, 3, 1, 3, 0,
+      'Handed in by 2 people: the very same repo, so every file is identical',
+    ])
+    expect(book.Sheets.Pairs.F2.l?.Target).toBe('https://github.com/rahim/task-1')
+  })
+
   it('writes one row per pair, with both repos named and linked', () => {
     const { book, rows } = roundTrip(klass)
-    const [header, first] = rows('Pairs')
+    const [header, , second] = rows('Pairs')
     expect(header).toEqual([
       'Pair', 'Result', 'Match', 'A ID', 'A name', 'A repo', 'B ID', 'B name', 'B repo',
       'Identical files', 'Share of A', 'A files compared', 'Share of B', 'B files compared',
       'Same name, other content', 'Note',
     ])
-    expect(rows('Pairs')).toHaveLength(2)
-    expect(first.slice(0, 2)).toEqual([1, 'Mostly identical'])
-    expect(first.slice(3, 9)).toEqual([
+    expect(rows('Pairs')).toHaveLength(3)
+    expect(second.slice(0, 2)).toEqual([2, 'Mostly identical'])
+    expect(second.slice(3, 9)).toEqual([
       '20-41234-1; 20-41238-1',
       'Rahim Uddin; Farhana Akter',
       'https://github.com/rahim/task-1',
@@ -121,26 +134,44 @@ describe('buildReportWorkbook', () => {
       'Karim Hasan',
       'https://github.com/karim/task-1',
     ])
-    expect(first.slice(9)).toEqual([2, 2 / 3, 3, 2 / 3, 3, 1, 'B is a fork'])
-    expect(book.Sheets.Pairs.F2.l?.Target).toBe('https://github.com/rahim/task-1')
-    expect(book.Sheets.Pairs.I2.l?.Target).toBe('https://github.com/karim/task-1')
+    expect(second.slice(9)).toEqual([2, 2 / 3, 3, 2 / 3, 3, 1, 'B is a fork'])
+    expect(book.Sheets.Pairs.F3.l?.Target).toBe('https://github.com/rahim/task-1')
+    expect(book.Sheets.Pairs.I3.l?.Target).toBe('https://github.com/karim/task-1')
+  })
+
+  it('colours each result, makes headers bold and keeps them in view', () => {
+    const { book, bytes } = roundTrip(klass)
+    const fill = (sheet: string, address: string) =>
+      (book.Sheets[sheet][address].s as { fgColor?: { rgb?: string } } | undefined)?.fgColor?.rgb
+    expect(fill('Pairs', 'A1')).toBe('E9E4D6')
+    expect(fill('Pairs', 'B2')).toBe('F6CDC8') // Same repo
+    expect(fill('Pairs', 'C2')).toBe('F6CDC8')
+    expect(fill('Pairs', 'B3')).toBe('FBE6B3') // Mostly identical
+    expect(fill('People', 'K2')).toBe('F6CDC8')
+    const zip = XLSX.CFB.read(bytes, { type: 'array' })
+    for (let n = 1; n <= 5; n++) {
+      const index = zip.FullPaths.findIndex((path: string) => path.endsWith(`/sheet${n}.xml`))
+      expect(new TextDecoder().decode(zip.FileIndex[index].content), `sheet${n}`).toContain('state="frozen"')
+    }
   })
 
   it('writes shares as real numbers that Excel shows as a percentage', () => {
     const pairs = roundTrip(klass).book.Sheets.Pairs
-    expect(pairs.C2).toMatchObject({ t: 'n', v: 2 / 3 })
-    expect(XLSX.SSF.format('0%', pairs.C2.v)).toBe('67%')
-    expect(pairs.C2.z).toBe('0%')
-    expect(pairs.K2.z).toBe('0%')
+    expect(pairs.C3).toMatchObject({ t: 'n', v: 2 / 3 })
+    expect(XLSX.SSF.format('0%', pairs.C3.v)).toBe('67%')
+    expect(pairs.C3.z).toBe('0%')
+    expect(pairs.K3.z).toBe('0%')
+    expect(pairs.C2).toMatchObject({ t: 'n', v: 1, z: '0%' })
   })
 
   it('names every matching file, with both paths when a copy was renamed', () => {
     const { rows } = roundTrip(klass)
     expect(rows('Matching files')).toEqual([
       ['Pair', 'A name', 'B name', 'What', 'Path in A', 'Path in B', 'Size (bytes)'],
-      [1, 'Rahim Uddin; Farhana Akter', 'Karim Hasan', 'Identical content', 'app.js', 'main.js', 2000],
-      [1, 'Rahim Uddin; Farhana Akter', 'Karim Hasan', 'Identical content', 'view.js', 'view.js', 2000],
-      [1, 'Rahim Uddin; Farhana Akter', 'Karim Hasan', 'Same name, other content', 'data.js', 'data.js', ''],
+      [1, 'Rahim Uddin; Farhana Akter', '(same people)', 'Same repo: every file is identical', '3 files compared', '', 6000],
+      [2, 'Rahim Uddin; Farhana Akter', 'Karim Hasan', 'Identical content', 'app.js', 'main.js', 2000],
+      [2, 'Rahim Uddin; Farhana Akter', 'Karim Hasan', 'Identical content', 'view.js', 'view.js', 2000],
+      [2, 'Rahim Uddin; Farhana Akter', 'Karim Hasan', 'Same name, other content', 'data.js', 'data.js', ''],
     ])
   })
 
@@ -155,9 +186,9 @@ describe('buildReportWorkbook', () => {
     const people = roundTrip(klass).rows('People')
     expect(people[0]).toEqual([
       'Row', 'ID', 'Name', 'Repo', 'Compared', 'Files compared', 'Starter files', 'Other files left out',
-      'Closest match', 'Closest match %', 'Closest result', 'Pairs mostly identical or more', 'Note',
+      'Closest match', 'Closest match repo', 'Closest match %', 'Closest result', 'Pairs mostly identical or more', 'Note',
     ])
-    expect(people.slice(1).map((row) => [row[0], row[2], row[4], row[12]])).toEqual([
+    expect(people.slice(1).map((row) => [row[0], row[2], row[4], row[13]])).toEqual([
       [2, 'Rahim Uddin', 'Yes', 'Same repo as row 6'],
       [3, 'Karim Hasan', 'Yes', ''],
       [4, 'Salma Akter', 'Yes', ''],
@@ -165,12 +196,18 @@ describe('buildReportWorkbook', () => {
       [6, 'Farhana Akter', 'Yes', 'Same repo as row 2'],
       [7, 'Fahim Morshed', 'No', 'Link could not be read'],
     ])
-    // Rahim: 3 files compared, none starter, 40 left out, closest is Karim at 67%.
-    expect(people[1].slice(5, 12)).toEqual([3, 0, 40, '20-41235-1 · Karim Hasan', 2 / 3, 'Mostly identical', 1])
+    // Rahim: 3 files compared, none starter, 40 left out; his closest match is Farhana, same repo.
+    expect(people[1].slice(5, 13)).toEqual([
+      3, 0, 40, 'Same repo as 20-41238-1 · Farhana Akter', 'https://github.com/rahim/task-1', 1, 'Same repo', 2,
+    ])
+    // Karim's closest is the repo Rahim and Farhana handed in, at 67%.
+    expect(people[2].slice(8, 13)).toEqual([
+      '20-41234-1 · Rahim Uddin, 20-41238-1 · Farhana Akter', 'https://github.com/rahim/task-1', 2 / 3, 'Mostly identical', 1,
+    ])
     // Salma took part and matched nobody; Fahim's cell is shown as typed, not as a link.
-    expect(people[3].slice(8, 12)).toEqual(['', '', '', 0])
+    expect(people[3].slice(8, 13)).toEqual(['', '', '', '', 0])
     expect(people[6][3]).toBe('will send later')
-    expect(people[6].slice(5, 12)).toEqual(['', '', '', '', '', '', ''])
+    expect(people[6].slice(5, 13)).toEqual(['', '', '', '', '', '', '', ''])
   })
 
   it('lists the starter files that were left out', () => {
@@ -221,10 +258,12 @@ describe('buildReportWorkbook', () => {
     expect(info.get('People compared')).toBe(4)
     expect(info.get('People not compared')).toBe(2)
     expect(info.get('Repos compared')).toBe(3)
-    expect(info.get('Repos handed in by more than one person')).toBe(1)
-    expect(info.get('Pairs that could be formed')).toBe(3)
-    expect(info.get('Pairs with identical files')).toBe(1)
-    expect(info.get('Pairs mostly identical or more')).toBe(1)
+    expect(info.get('Matches found (rows on the Pairs sheet)')).toBe(2)
+    expect(info.get('Repos handed in by more than one person (100% match)')).toBe(1)
+    expect(info.get('People who handed in the same repo as someone else')).toBe(2)
+    expect(info.get('Pairs of different repos that could be formed')).toBe(3)
+    expect(info.get('Pairs of different repos with identical files')).toBe(1)
+    expect(info.get('Pairs of different repos mostly identical or more')).toBe(1)
     expect(info.get('Matching files listed')).toBe(3)
     expect(info.get('Starter-file limit')).toBe(4)
     expect(info.get('Starter files left out')).toBe(0)
@@ -273,17 +312,14 @@ describe('reportFileName', () => {
 })
 
 describe('downloadReport', () => {
-  it('saves the workbook under the right name, compressed', () => {
-    let captured: { sheets: string[]; name: string; compression: boolean | undefined } | null = null
-    const writer = ((book: XLSX.WorkBook, name: string, options?: { compression?: boolean }) => {
-      captured = { sheets: book.SheetNames, name, compression: options?.compression }
-    }) as typeof XLSX.writeFile
+  it('saves the finished file under the right name', () => {
+    const save = vi.fn()
     process.env.TZ = 'Asia/Dhaka'
-    downloadReport(input(klass), writer)
-    expect(captured).toEqual({
-      sheets: ['Pairs', 'Matching files', 'Same repo', 'People', 'Starter files', 'Info'],
-      name: 'similarity-2026-10-05-2359.xlsx',
-      compression: true,
-    })
+    downloadReport(input(klass), save)
+    const [bytes, name] = save.mock.calls[0]
+    expect(name).toBe('similarity-2026-10-05-2359.xlsx')
+    expect(XLSX.read(bytes, { type: 'array' }).SheetNames).toEqual([
+      'Pairs', 'Matching files', 'Same repo', 'People', 'Starter files', 'Info',
+    ])
   })
 })

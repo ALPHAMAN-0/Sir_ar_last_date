@@ -85,15 +85,18 @@ async function openSimilarity() {
 
 const summaryLine = () => screen.findByText(/compared, which makes/)
 const pairRows = () => within(screen.getByRole('table')).getAllByRole('row').slice(1)
-/** A pair row as [repo A, repo B, match, identical, of A, of B]. */
+/** A pair row as [repo A, repo B, match, identical, of A, of B]. A same-repo row has no second link. */
 const pairLine = (row: HTMLElement) => {
   const [a, b, ...numbers] = within(row).getAllByRole('cell')
   return [
     within(a).getByRole('link').textContent,
-    within(b).getByRole('link').textContent,
+    within(b).queryByRole('link')?.textContent ?? b.textContent,
     ...numbers.slice(0, 4).map((cell) => cell.textContent),
   ]
 }
+const ALL_PAIRS =
+  '4 matches found: 1 repo handed in by more than one person (100%) and 3 pairs of different repos with ' +
+  'identical files. 3 repos compared, which makes 3 pairs.'
 /** The text of each part of a list item, e.g. [path, size]. */
 const parts = (item: HTMLElement) => [...item.children].map((child) => child.textContent)
 
@@ -108,18 +111,17 @@ describe('SimilarityView', () => {
 
   it('compares the repos in a worker and lists the pairs, strongest first', async () => {
     await openSimilarity()
-    expect((await summaryLine()).closest('p')?.textContent).toBe(
-      '3 repos compared, which makes 3 pairs. 3 pairs share at least one identical file.',
-    )
+    expect((await summaryLine()).closest('p')?.textContent).toBe(ALL_PAIRS)
     expect(pairRows().map(pairLine)).toEqual([
-      ['a/x', 'b/y', '75% Mostly identical', '3 files', '3 of 4', '3 of 4'],
-      ['a/x', 'c/z', '33% Partly identical', '1 file', '1 of 4', '1 of 3'],
-      ['b/y', 'c/z', '33% Partly identical', '1 file', '1 of 4', '1 of 3'],
+      ['a/x', 'Same repo handed in by 2 people', '100% Same repo', '4 files', '4 of 4 · 100%', '4 of 4 · 100%'],
+      ['a/x', 'b/y', '75% Mostly identical', '3 files', '3 of 4 · 75%', '3 of 4 · 75%'],
+      ['a/x', 'c/z', '33% Partly identical', '1 file', '1 of 4 · 25%', '1 of 3 · 33%'],
+      ['b/y', 'c/z', '33% Partly identical', '1 file', '1 of 4 · 25%', '1 of 3 · 33%'],
     ])
-    const first = pairRows()[0]
-    expect(within(first).getByText('22-46001-1 · Rahim Uddin, 22-46004-1 · Nusrat Jahan')).toBeTruthy()
-    expect(within(first).getByText('22-46002-1 · Karim Hasan')).toBeTruthy()
-    expect(within(first).getByRole('link', { name: 'a/x' }).getAttribute('href')).toBe('https://github.com/a/x')
+    const pair = pairRows()[1]
+    expect(within(pair).getByText('22-46001-1 · Rahim Uddin, 22-46004-1 · Nusrat Jahan')).toBeTruthy()
+    expect(within(pair).getByText('22-46002-1 · Karim Hasan')).toBeTruthy()
+    expect(within(pair).getByRole('link', { name: 'a/x' }).getAttribute('href')).toBe('https://github.com/a/x')
 
     expect(asked).toHaveLength(1)
     expect(new URL(asked[0].url).pathname).toBe('/src/similarity/compare.worker.ts')
@@ -144,6 +146,24 @@ describe('SimilarityView', () => {
     )
   })
 
+  it('opens a repo handed in by several people to show who and which files', async () => {
+    await openSimilarity()
+    await summaryLine()
+    fireEvent.click(within(pairRows()[0]).getByRole('button', { name: 'Show files' }))
+    const people = screen.getByRole('heading', { name: 'Handed in by (2)' }).parentElement as HTMLElement
+    expect(within(people).getAllByRole('listitem').map(parts)).toEqual([
+      ['22-46001-1 · Rahim Uddin', 'row 2'],
+      ['22-46004-1 · Nusrat Jahan', 'row 5'],
+    ])
+    const files = screen.getByRole('heading', { name: 'Files, the same for all of them (4)' }).parentElement as HTMLElement
+    expect(within(files).getAllByRole('listitem').map((item) => item.children[0].textContent)).toEqual([
+      'README.md',
+      'index.html',
+      'src/app.js',
+      'src/view.js',
+    ])
+  })
+
   it('accounts for every row that could not be compared', async () => {
     await openSimilarity()
     await summaryLine()
@@ -157,7 +177,7 @@ describe('SimilarityView', () => {
   it('opens a pair to show its identical files and what was left out', async () => {
     await openSimilarity()
     await summaryLine()
-    const toggle = within(pairRows()[0]).getByRole('button', { name: 'Show files' })
+    const toggle = within(pairRows()[1]).getByRole('button', { name: 'Show files' })
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
 
@@ -179,7 +199,7 @@ describe('SimilarityView', () => {
       'Left out of B': 'nothing',
     })
 
-    fireEvent.click(within(pairRows()[0]).getByRole('button', { name: 'Hide files' }))
+    fireEvent.click(within(pairRows()[1]).getByRole('button', { name: 'Hide files' }))
     expect(screen.queryByRole('heading', { name: /Identical content/ })).toBeNull()
   })
 
@@ -198,7 +218,8 @@ describe('SimilarityView', () => {
     fireEvent.change(limit, { target: { value: '2' } })
     expect(await screen.findByText(/1 file is left out this way/)).toBeTruthy()
     expect((await summaryLine()).closest('p')?.textContent).toBe(
-      '3 repos compared, which makes 3 pairs. 1 pair shares at least one identical file.',
+      '2 matches found: 1 repo handed in by more than one person (100%) and 1 pair of different repos with ' +
+        'identical files. 3 repos compared, which makes 3 pairs.',
     )
     expect(asked.map((entry) => entry.request.commonLimit)).toEqual([3, 2])
 
@@ -216,16 +237,15 @@ describe('SimilarityView', () => {
       },
     )
     await openSimilarity()
-    expect((await summaryLine()).closest('p')?.textContent).toBe(
-      '3 repos compared, which makes 3 pairs. 3 pairs share at least one identical file.',
-    )
+    expect((await summaryLine()).closest('p')?.textContent).toBe(ALL_PAIRS)
   })
 
   it('says why a file list could not be loaded, and tries again on request', async () => {
     fake.api.trees['c/z'] = failure(404, 'not_found', 'Not found.')
     await openSimilarity()
     expect((await summaryLine()).closest('p')?.textContent).toBe(
-      '2 repos compared, which makes 1 pair. 1 pair shares at least one identical file.',
+      '2 matches found: 1 repo handed in by more than one person (100%) and 1 pair of different repos with ' +
+        'identical files. 2 repos compared, which makes 1 pair.',
     )
     const fold = screen.getByText('Not compared (3)').closest('details') as HTMLElement
     expect(within(fold).getByText('GitHub no longer shows this repo. It may be private or deleted now.')).toBeTruthy()
@@ -233,9 +253,7 @@ describe('SimilarityView', () => {
     fake.api.trees['c/z'] = TREES['c/z']
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     await waitFor(async () =>
-      expect((await summaryLine()).closest('p')?.textContent).toBe(
-        '3 repos compared, which makes 3 pairs. 3 pairs share at least one identical file.',
-      ),
+      expect((await summaryLine()).closest('p')?.textContent).toBe(ALL_PAIRS),
     )
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
   })

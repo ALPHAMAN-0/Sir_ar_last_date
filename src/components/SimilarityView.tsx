@@ -170,6 +170,8 @@ export function SimilarityView() {
   const nothing = plan.waiting === 0 && plan.inputs.length === 0
   const failed = loaded ? loaded.errors.size : 0
   const pairs = summary?.pairs ?? []
+  const sameRepoRows = pairs.filter((pair) => pair.kind === 'same_repo').length
+  const repoPairs = pairs.length - sameRepoRows
   const shown = showAll ? pairs : pairs.slice(0, VISIBLE_PAIRS)
   const limits = [...new Set([...LIMIT_CHOICES.filter((value) => value < never), suggested, never])].sort(
     (a, b) => a - b,
@@ -199,7 +201,8 @@ export function SimilarityView() {
       {sameRepo.length > 0 ? (
         <div className="notice notice--bad similarity__same" role="note">
           <p>
-            <strong>{plural(sameRepo.length, 'repo was', 'repos were')} handed in by more than one person.</strong>
+            <strong>{plural(sameRepo.length, 'repo was', 'repos were')} handed in by more than one person.</strong>{' '}
+            Each is a 100% match and is listed first in the table below.
           </p>
           <ul>
             {sameRepo.map((group) => (
@@ -243,9 +246,22 @@ export function SimilarityView() {
         <>
           <div className="similarity__bar">
             <p className="similarity__summary">
-              <strong>{plural(summary.compared, 'repo')}</strong> compared, which makes{' '}
-              {plural(analysis.totalPairs, 'pair')}. <strong>{plural(pairs.length, 'pair')}</strong>{' '}
-              {pairs.length === 1 ? 'shares' : 'share'} at least one identical file.
+              <strong>{plural(pairs.length, 'match', 'matches')}</strong> found
+              {pairs.length > 0 ? ':' : '.'}{' '}
+              {sameRepoRows > 0 ? (
+                <>
+                  {plural(sameRepoRows, 'repo')} handed in by more than one person (100%)
+                  {repoPairs > 0 ? ' and ' : '. '}
+                </>
+              ) : null}
+              {repoPairs > 0 || sameRepoRows === 0 ? (
+                <>
+                  {plural(repoPairs, 'pair')} of different repos with identical files.{' '}
+                </>
+              ) : null}
+              <span className="similarity__dim">
+                {plural(summary.compared, 'repo')} compared, which makes {plural(analysis.totalPairs, 'pair')}.
+              </span>
             </p>
             <div className="similarity__actions">
               {failed > 0 ? (
@@ -382,7 +398,11 @@ export function SimilarityView() {
                         {isOpen ? (
                           <tr className="similarity__detail">
                             <td colSpan={7}>
-                              <PairFiles pair={pair} trees={loaded.trees} shared={shared} />
+                              {pair.kind === 'same_repo' ? (
+                                <SameRepoFiles pair={pair} tree={loaded.trees.get(pair.a.repo)} />
+                              ) : (
+                                <PairFiles pair={pair} trees={loaded.trees} shared={shared} />
+                              )}
                             </td>
                           </tr>
                         ) : null}
@@ -392,6 +412,12 @@ export function SimilarityView() {
                 </tbody>
               </table>
             </div>
+            {repoPairs === 0 ? (
+              <p className="similarity__more">
+                Apart from the repos handed in by more than one person, no two different repos hold a
+                file with the same content.
+              </p>
+            ) : null}
             {pairs.length > shown.length ? (
               <p className="similarity__more">
                 Showing the {shown.length} strongest of {pairs.length.toLocaleString('en')} pairs.{' '}
@@ -409,10 +435,15 @@ export function SimilarityView() {
   )
 }
 
-function Side({ group }: { group: RepoGroup }) {
+/** "3 of 5 · 60%": how many of one side's compared files are in the other, and that share. */
+function ofText(identical: number, own: number, share: number): string {
+  return own === 0 ? '100%' : `${identical} of ${own} · ${percent(share)}`
+}
+
+function Side({ group, max }: { group: RepoGroup; max?: number }) {
   return (
     <>
-      <strong>{groupLabel(group)}</strong>
+      <strong>{groupLabel(group, max)}</strong>
       <a className="similarity__repo mono" href={repoUrl(group.repo)} target="_blank" rel="noopener noreferrer">
         {group.nameWithOwner}
       </a>
@@ -435,27 +466,43 @@ function PairLine({ pair, isOpen, onToggle }: { pair: PairRow; isOpen: boolean; 
       className={`entry entry--${tone} similarity__row${isOpen ? ' similarity__row--open' : ''}`}
       onClick={onRowClick}
     >
-      <td className="similarity__side" data-label="A">
-        <Side group={pair.a} />
-      </td>
-      <td className="similarity__side" data-label="B">
-        <Side group={pair.b} />
-      </td>
+      {pair.kind === 'same_repo' ? (
+        <>
+          <td className="similarity__side" data-label="People">
+            <Side group={pair.a} max={pair.a.people.length} />
+          </td>
+          <td className="similarity__side" data-label="Repo">
+            <strong>Same repo</strong>{' '}
+            <span className="similarity__dim">handed in by {plural(pair.a.people.length, 'person', 'people')}</span>
+          </td>
+        </>
+      ) : (
+        <>
+          <td className="similarity__side" data-label="A">
+            <Side group={pair.a} />
+          </td>
+          <td className="similarity__side" data-label="B">
+            <Side group={pair.b} />
+          </td>
+        </>
+      )}
       <td className="similarity__match" data-label="Match">
         <span className={`stamp stamp--${tone}`}>
           <span className="stamp__label">{percent(summary.score)}</span>
           <span className="stamp__detail"> {tierLabel(summary.tier)}</span>
         </span>
-        {summary.sameCommit ? <span className="entry__notes">Same commit in both repos</span> : null}
+        {summary.sameCommit && pair.kind === 'repos' ? (
+          <span className="entry__notes">Same commit in both repos</span>
+        ) : null}
       </td>
       <td className="is-number mono" data-label="Identical">
-        {plural(summary.identical, 'file')}
+        {pair.kind === 'same_repo' && summary.identical === 0 ? 'every file' : plural(summary.identical, 'file')}
       </td>
       <td className="is-number mono" data-label="Of A">
-        {summary.aIdentical} of {summary.aOwn}
+        {ofText(summary.aIdentical, summary.aOwn, summary.aShare)}
       </td>
       <td className="is-number mono" data-label="Of B">
-        {summary.bIdentical} of {summary.bOwn}
+        {ofText(summary.bIdentical, summary.bOwn, summary.bShare)}
       </td>
       <td className="similarity__toggle">
         <button type="button" className="linkish" aria-expanded={isOpen} onClick={onToggle}>
@@ -463,6 +510,47 @@ function PairLine({ pair, isOpen, onToggle }: { pair: PairRow; isOpen: boolean; 
         </button>
       </td>
     </tr>
+  )
+}
+
+/** The detail of a repo handed in by several people: who, and the files they all handed in. */
+function SameRepoFiles({ pair, tree }: { pair: PairRow; tree: RepoFiles | undefined }) {
+  return (
+    <div className="similarity__files">
+      <section className="similarity__paths similarity__paths--bad">
+        <h4 className="similarity__paths-title">Handed in by ({pair.a.people.length})</h4>
+        <ul className="similarity__paths-list">
+          {pair.a.people.map((person) => (
+            <li key={person.rowId}>
+              <span>{personLabel(person)}</span>
+              <span className="similarity__dim">row {person.rowNumber}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+      {tree ? (
+        <section className="similarity__paths">
+          <h4 className="similarity__paths-title">Files, the same for all of them ({tree.files.length})</h4>
+          <ul className="similarity__paths-list">
+            {tree.files.slice(0, VISIBLE_FILES).map((file) => (
+              <li key={file.path}>
+                <span className="mono">{file.path}</span>
+                <span className="similarity__dim">{fileSize(file.size)}</span>
+              </li>
+            ))}
+            {tree.files.length > VISIBLE_FILES ? (
+              <li className="similarity__dim">
+                +{(tree.files.length - VISIBLE_FILES).toLocaleString('en')} more
+              </li>
+            ) : null}
+          </ul>
+          <dl className="similarity__rest">
+            <dt>Left out</dt>
+            <dd>{leftOutText(tree)}</dd>
+          </dl>
+        </section>
+      ) : null}
+    </div>
   )
 }
 

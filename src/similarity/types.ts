@@ -23,8 +23,11 @@ export type RepoFiles = {
   unopened: number
 }
 
-/** `thin`: identical files exist, but too few and too small to weigh by percentage. */
-export type Tier = 'almost_all' | 'most' | 'part' | 'little' | 'thin'
+/**
+ * `same_repo`: one repo handed in by several people, so every file is the same.
+ * `thin`: identical files exist, but too few and too small to weigh by percentage.
+ */
+export type Tier = 'same_repo' | 'almost_all' | 'most' | 'part' | 'little' | 'thin'
 
 /** One pair of repos that have something in common. */
 export type PairSummary = {

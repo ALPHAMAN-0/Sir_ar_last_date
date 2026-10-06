@@ -24,9 +24,9 @@ On a shared computer, press Clear when you are done.
 
 | Screen | What you see |
 |--------|--------------|
-| **Register** | One row per person: status, how late, repo created, last push, last commit, number of commits. Sort, filter by status, search, download as `.xlsx`. |
+| **Register** | One row per person: status, how late, repo created, last push, last commit, number of commits. Sort, filter by status, search, and download a results report as `.xlsx`. |
 | **Person** | Open a row to see the commits grouped by date, the files each commit changed, and the deadline drawn across the timeline. |
-| **Similarity** | Which repos hold files with exactly the same content, which people handed in the very same repo, and a report as `.xlsx`. |
+| **Similarity** | Which people handed in the very same repo (a 100% match), which different repos hold files with exactly the same content and how much, and a report as `.xlsx`. |
 
 ## How it fits together
 
@@ -142,6 +142,24 @@ Open a person to see their commits grouped by date, the files each commit
 changed, and the deadline drawn across the timeline. Commits that reached GitHub
 after the deadline are marked, even when their own date says otherwise.
 
+### The results report
+
+**Download .xlsx** on the Register writes the rows on screen, in the order on
+screen. When a filter or a search is on, the Summary says so ("3 of 15").
+
+| Sheet | One row per | Holds |
+|-------|-------------|-------|
+| Summary | status | how many people have it and their share, who needs attention, who shares a repo, the deadline and check time |
+| Results | person | status, how late, notes, dates, commits, branch, and a clickable repo link |
+| Needs attention | late, changed, empty, missing or broken row | the most urgent first, with what to do about each |
+| Same repo | repo handed in by several people | their IDs, names, sheet rows and statuses |
+| Info | | how lateness is judged and what each status means |
+
+Each status has its colour (green on time, amber changed, red late or empty, grey
+missing), header rows are bold and stay in view while scrolling, and every
+column has a filter button. Dates are real Excel dates; names are plain text,
+never formulas.
+
 ## The similarity check
 
 The Similarity tab answers one question: **which repos hold files with exactly
@@ -206,6 +224,7 @@ a small repo that sits completely inside a bigger one reads 100%.
 
 | Label | When |
 |-------|------|
+| Same repo | one repo handed in by several people: 100%, listed first |
 | Almost all identical | Match of 80% or more |
 | Mostly identical | 50% or more |
 | Partly identical | 20% or more |
@@ -214,6 +233,7 @@ a small repo that sits completely inside a bigger one reads 100%.
 
 Open a pair to see the files: identical ones (with both paths when the copy was
 renamed), files with the same name but other content, and what each rule left out.
+Open a "Same repo" row to see everyone who handed it in and its files.
 "Same commit in both repos" means one repo is a copy of the other's whole history.
 
 ### What it cannot see
@@ -235,17 +255,18 @@ anything.
 
 | Sheet | One row per | Holds |
 |-------|-------------|-------|
-| Pairs | pair of repos with identical files | result, match, both people and repo links, counts and shares |
+| Pairs | repo handed in by several people (first, at 100%), then pair of repos with identical files | result, match, both people and repo links, counts and shares |
 | Matching files | identical file | pair number, path in A, path in B, size |
 | Same repo | repo handed in by several people | their IDs, names and sheet rows |
-| People | row of your sheet | compared or not and why, files compared, closest match |
+| People | row of your sheet | compared or not and why, files compared, closest match with its repo and percentage |
 | Starter files | content left out as starter file | name, number of repos, size |
 | Info | | when and how the report was made, and what it cannot see |
 
 Every row of the uploaded sheet appears on the People sheet, so nobody is
 silently missing. Percentages are real numbers (they sort and filter), repo
-links are clickable, and every column has a filter button. Names and paths are
-written as plain text, never as formulas.
+links are clickable, results are coloured, header rows stay in view, and every
+column has a filter button. Names and paths are written as plain text, never as
+formulas.
 
 ## Run it on your computer
 
@@ -349,7 +370,7 @@ shared/        request rules and types used by both sides
 worker/        the server: talks to GitHub, caches, rate-limits
   routes/      /repos, /activity, /commits, /commit, /tree, /status
 src/
-  sheet/       reading the Excel file, finding columns, the register's export
+  sheet/       reading the Excel file, finding columns, the results report, report colours
   logic/       the status rule, push times, sorting, dates
   similarity/  rules, file lists, the comparison, the report
   state/       the store and data loading
@@ -374,7 +395,7 @@ React, TypeScript and Vite, with the Cloudflare Vite plugin. The Excel library
 
 Every rule that decides something is a pure function with unit tests next to it
 (`*.test.ts`), and every screen has tests that click through it in a simulated
-browser (`*.test.tsx`, jsdom and Testing Library): 346 tests in 31 files. The
+browser (`*.test.tsx`, jsdom and Testing Library): 372 tests in 32 files. The
 tests replace `fetch` with a fake API (`src/test/fakeApi.ts` for the page), so
 they never call GitHub.
 

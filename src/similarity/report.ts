@@ -6,8 +6,9 @@
 
 import * as XLSX from 'xlsx'
 import { repoUrl } from '../logic/people.ts'
+import { headerCells, saveFile, writeStyledXlsx, type Paint, type SheetStyle } from '../sheet/xlsxStyle.ts'
 import { pairDetail, sharedSets } from './compare.ts'
-import { tierLabel } from './format.ts'
+import { tierLabel, tierTone } from './format.ts'
 import { MIN_BYTES } from './rules.ts'
 import type { RepoGroup } from './run.ts'
 import type { PairRow, PersonLine, Summary } from './summary.ts'
@@ -63,29 +64,45 @@ function excelDate(instant: number): XLSX.CellObject {
   return { t: 'n', v: localMs / MS_PER_DAY + EXCEL_EPOCH_OFFSET, z: DATE_FORMAT }
 }
 
-type Column<Row> = { title: string; width: number; cell: (row: Row) => XLSX.CellObject }
+type Column<Row> = {
+  title: string
+  width: number
+  cell: (row: Row) => XLSX.CellObject
+  paint?: (row: Row) => Paint | null
+}
 
-/** A sheet with a header row, column widths and a filter button on every column. */
-function table<Row>(columns: ReadonlyArray<Column<Row>>, rows: readonly Row[]): XLSX.WorkSheet {
+type Table = { sheet: XLSX.WorkSheet; style: SheetStyle }
+
+/** A sheet with a bold, frozen header row, column widths and a filter button on every column. */
+function table<Row>(columns: ReadonlyArray<Column<Row>>, rows: readonly Row[]): Table {
   const sheet: XLSX.WorkSheet = {}
+  const cells = headerCells(columns.length)
   columns.forEach((column, c) => {
     sheet[XLSX.utils.encode_cell({ r: 0, c })] = text(column.title)
     rows.forEach((row, r) => {
-      sheet[XLSX.utils.encode_cell({ r: r + 1, c })] = column.cell(row)
+      const address = XLSX.utils.encode_cell({ r: r + 1, c })
+      sheet[address] = column.cell(row)
+      const paint = column.paint?.(row)
+      if (paint) cells.set(address, paint)
     })
   })
   const ref = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: columns.length - 1 } })
   sheet['!ref'] = ref
   sheet['!cols'] = columns.map((column) => ({ wch: column.width }))
   sheet['!autofilter'] = { ref }
-  return sheet
+  return { sheet, style: { freezeHeader: true, cells } }
 }
+
+const resultPaint = (row: PairRow): Paint => tierTone(row.summary.tier)
 
 const ids = (group: RepoGroup) => group.people.map((person) => person.id).filter(Boolean).join('; ')
 const names = (group: RepoGroup) =>
   group.people.map((person) => person.name || `Row ${person.rowNumber}`).join('; ')
 
-function pairNote({ summary, a, b }: PairRow): string {
+function pairNote({ kind, summary, a, b }: PairRow): string {
+  if (kind === 'same_repo') {
+    return `Handed in by ${a.people.length} people: the very same repo, so every file is identical`
+  }
   const notes: string[] = []
   if (summary.sameCommit) notes.push('Both repos are at the very same commit')
   if (a.isFork) notes.push('A is a fork')
@@ -95,13 +112,14 @@ function pairNote({ summary, a, b }: PairRow): string {
 
 const PAIR_COLUMNS: ReadonlyArray<Column<PairRow>> = [
   { title: 'Pair', width: 6, cell: (row) => number(row.number) },
-  { title: 'Result', width: 22, cell: (row) => text(tierLabel(row.summary.tier)) },
-  { title: 'Match', width: 8, cell: (row) => share(row.summary.score) },
+  { title: 'Result', width: 22, cell: (row) => text(tierLabel(row.summary.tier)), paint: resultPaint },
+  { title: 'Match', width: 8, cell: (row) => share(row.summary.score), paint: resultPaint },
   { title: 'A ID', width: 14, cell: (row) => text(ids(row.a)) },
   { title: 'A name', width: 24, cell: (row) => text(names(row.a)) },
   { title: 'A repo', width: 44, cell: (row) => repoLink(row.a.repo) },
-  { title: 'B ID', width: 14, cell: (row) => text(ids(row.b)) },
-  { title: 'B name', width: 24, cell: (row) => text(names(row.b)) },
+  // For a repo handed in by several people, everyone is on side A.
+  { title: 'B ID', width: 14, cell: (row) => text(row.kind === 'same_repo' ? '' : ids(row.b)) },
+  { title: 'B name', width: 24, cell: (row) => text(row.kind === 'same_repo' ? '(same people as A)' : names(row.b)) },
   { title: 'B repo', width: 44, cell: (row) => repoLink(row.b.repo) },
   { title: 'Identical files', width: 14, cell: (row) => number(row.summary.identical) },
   { title: 'Share of A', width: 11, cell: (row) => share(row.summary.aShare) },
@@ -132,12 +150,27 @@ const FILE_COLUMNS: ReadonlyArray<Column<FileRow>> = [
   { title: 'Size (bytes)', width: 12, cell: (row) => number(row.size) },
 ]
 
+/** The one line a repo handed in by several people gets: its files are all identical. */
+const SAME_REPO_LINE = 'Same repo: every file is identical'
+
 /** The files behind each pair, strongest pair first, until the sheet is long enough. */
 function fileRows(input: ReportInput): FileRow[] {
   const shared = sharedSets(input.analysis)
   const rows: FileRow[] = []
   for (const pair of input.summary.pairs) {
     if (rows.length >= MAX_FILE_ROWS) break
+    if (pair.kind === 'same_repo') {
+      rows.push({
+        pair: pair.number,
+        a: names(pair.a),
+        b: '(same people)',
+        kind: SAME_REPO_LINE,
+        aPath: `${pair.summary.identical.toLocaleString('en')} files compared`,
+        bPath: '',
+        size: pair.summary.identicalBytes,
+      })
+      continue
+    }
     const a = input.trees.get(pair.a.repo)
     const b = input.trees.get(pair.b.repo)
     if (!a || !b) continue
@@ -195,8 +228,19 @@ const PEOPLE_COLUMNS: ReadonlyArray<Column<PersonLine>> = [
   { title: 'Starter files', width: 13, cell: (line) => number(line.stats?.starter ?? null) },
   { title: 'Other files left out', width: 18, cell: (line) => number(line.skipped) },
   { title: 'Closest match', width: 30, cell: (line) => text(line.closest?.label ?? '') },
-  { title: 'Closest match %', width: 15, cell: (line) => share(line.closest?.score ?? null) },
-  { title: 'Closest result', width: 22, cell: (line) => text(line.closest ? tierLabel(line.closest.tier) : '') },
+  { title: 'Closest match repo', width: 44, cell: (line) => repoLink(line.closest?.repo ?? null) },
+  {
+    title: 'Closest match %',
+    width: 15,
+    cell: (line) => share(line.closest?.score ?? null),
+    paint: (line) => (line.closest ? tierTone(line.closest.tier) : null),
+  },
+  {
+    title: 'Closest result',
+    width: 22,
+    cell: (line) => text(line.closest ? tierLabel(line.closest.tier) : ''),
+    paint: (line) => (line.closest ? tierTone(line.closest.tier) : null),
+  },
   { title: 'Pairs mostly identical or more', width: 28, cell: (line) => number(line.compared ? line.strongPairs : null) },
   { title: 'Note', width: 60, cell: (line) => text(line.note) },
 ]
@@ -209,7 +253,8 @@ const STARTER_COLUMNS: ReadonlyArray<Column<StarterFile>> = [
 
 function infoSheet(input: ReportInput, listedFiles: number): XLSX.WorkSheet {
   const { summary, analysis, info } = input
-  const strongPairs = summary.pairs.filter(
+  const repoPairs = summary.pairs.filter((pair) => pair.kind === 'repos')
+  const strongPairs = repoPairs.filter(
     (pair) => pair.summary.tier === 'almost_all' || pair.summary.tier === 'most',
   ).length
   const lines: Array<[string, XLSX.CellObject]> = [
@@ -221,10 +266,12 @@ function infoSheet(input: ReportInput, listedFiles: number): XLSX.WorkSheet {
     ['People compared', number(summary.people.filter((line) => line.compared).length)],
     ['People not compared', number(summary.people.filter((line) => !line.compared).length)],
     ['Repos compared', number(summary.compared)],
-    ['Repos handed in by more than one person', number(summary.sameRepo.length)],
-    ['Pairs that could be formed', number(analysis.totalPairs)],
-    ['Pairs with identical files', number(summary.pairs.length)],
-    ['Pairs mostly identical or more', number(strongPairs)],
+    ['Matches found (rows on the Pairs sheet)', number(summary.pairs.length)],
+    ['Repos handed in by more than one person (100% match)', number(summary.sameRepo.length)],
+    ['People who handed in the same repo as someone else', number(summary.sameRepo.reduce((sum, group) => sum + group.people.length, 0))],
+    ['Pairs of different repos that could be formed', number(analysis.totalPairs)],
+    ['Pairs of different repos with identical files', number(repoPairs.length)],
+    ['Pairs of different repos mostly identical or more', number(strongPairs)],
     ['Matching files listed', number(listedFiles)],
     ['Starter-file limit', number(analysis.commonLimit)],
     ['Starter files left out', number(analysis.starter.length)],
@@ -234,7 +281,7 @@ function infoSheet(input: ReportInput, listedFiles: number): XLSX.WorkSheet {
     ],
     [
       'What a percentage means',
-      text('The share of one repo’s compared files that are also in the other repo. "Match" is the larger of the two shares.'),
+      text('The share of one repo’s compared files that are also in the other repo. "Match" is the larger of the two shares. A repo handed in by several people is a 100% match.'),
     ],
     [
       'What a starter file is',
@@ -272,20 +319,24 @@ function infoSheet(input: ReportInput, listedFiles: number): XLSX.WorkSheet {
  *   Starter files   contents left out because many repos have them
  *   Info            how the report was made and what it cannot see
  */
-export function buildReportWorkbook(input: ReportInput): XLSX.WorkBook {
+export function buildReport(input: ReportInput): { book: XLSX.WorkBook; styles: SheetStyle[] } {
   const files = fileRows(input)
+  const tables: Array<[string, Table]> = [
+    ['Pairs', table(PAIR_COLUMNS, input.summary.pairs)],
+    ['Matching files', table(FILE_COLUMNS, files)],
+    ['Same repo', table(SAME_REPO_COLUMNS, input.summary.sameRepo)],
+    ['People', table(PEOPLE_COLUMNS, input.summary.people)],
+    ['Starter files', table(STARTER_COLUMNS, input.analysis.starter.slice(0, MAX_STARTER_ROWS))],
+  ]
   const book = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(book, table(PAIR_COLUMNS, input.summary.pairs), 'Pairs')
-  XLSX.utils.book_append_sheet(book, table(FILE_COLUMNS, files), 'Matching files')
-  XLSX.utils.book_append_sheet(book, table(SAME_REPO_COLUMNS, input.summary.sameRepo), 'Same repo')
-  XLSX.utils.book_append_sheet(book, table(PEOPLE_COLUMNS, input.summary.people), 'People')
-  XLSX.utils.book_append_sheet(
-    book,
-    table(STARTER_COLUMNS, input.analysis.starter.slice(0, MAX_STARTER_ROWS)),
-    'Starter files',
-  )
-  XLSX.utils.book_append_sheet(book, infoSheet(input, files.length), 'Info')
-  return book
+  for (const [name, { sheet }] of tables) XLSX.utils.book_append_sheet(book, sheet, name)
+  const listed = files.filter((row) => row.kind !== SAME_REPO_LINE).length
+  XLSX.utils.book_append_sheet(book, infoSheet(input, listed), 'Info')
+  return { book, styles: [...tables.map(([, { style }]) => style), { cells: new Map() }] }
+}
+
+export function buildReportWorkbook(input: ReportInput): XLSX.WorkBook {
+  return buildReport(input).book
 }
 
 /** "similarity-2026-10-05-2359.xlsx": the check time in the local zone. */
@@ -296,7 +347,13 @@ export function reportFileName(checkedAt: number): string {
   return `similarity-${stamp}.xlsx`
 }
 
-/** Saves the workbook as a file. `writer` is replaced in tests, which have no browser. */
-export function downloadReport(input: ReportInput, writer: typeof XLSX.writeFile = XLSX.writeFile): void {
-  writer(buildReportWorkbook(input), reportFileName(input.info.checkedAt), { compression: true })
+/** The finished file, with its colours, bold headers and frozen header rows. */
+export function writeReport(input: ReportInput): Uint8Array {
+  const { book, styles } = buildReport(input)
+  return writeStyledXlsx(book, styles)
+}
+
+/** Saves the report as a file. `save` is replaced in tests, which have no browser. */
+export function downloadReport(input: ReportInput, save = saveFile): void {
+  save(writeReport(input), reportFileName(input.info.checkedAt))
 }

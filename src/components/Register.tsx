@@ -31,6 +31,7 @@ export function Register() {
   const replaceInput = useRef<HTMLInputElement>(null)
   const [picking, setPicking] = useState(false)
   const [confirmingClear, setConfirmingClear] = useState(false)
+  const [downloadFailed, setDownloadFailed] = useState(false)
 
   const deadlinePassed = deadline !== null && now > deadline
   const counts = useMemo(() => countByStatus(people), [people])
@@ -51,17 +52,29 @@ export function Register() {
 
   const download = async () => {
     const stamp = Date.now()
-    // The Excel library is fetched on first use.
-    const excel = await import('../sheet/exportXlsx.ts')
-    excel.downloadWorkbook(
-      excel.buildWorkbook(toExportRows(shown, deadlinePassed), {
-        sheetName: sheet.fileName,
-        deadline,
-        checkedAt: checkedAt ?? stamp,
-        zone: zoneLabel(),
-      }),
-      excel.exportFileName(stamp),
-    )
+    const filters = [
+      statusFilter === 'all' ? '' : `Status: ${statusLabel(statusFilter, deadlinePassed)}`,
+      search.trim() ? `search: "${search.trim()}"` : '',
+    ].filter(Boolean)
+    setDownloadFailed(false)
+    try {
+      // The Excel library is fetched on first use.
+      const excel = await import('../sheet/exportXlsx.ts')
+      excel.downloadWorkbook(
+        excel.buildWorkbook(toExportRows(shown, deadlinePassed), {
+          sheetName: sheet.fileName,
+          deadline,
+          checkedAt: checkedAt ?? stamp,
+          zone: zoneLabel(),
+          totalPeople: people.length,
+          filter: filters.length > 0 ? `filtered by ${filters.join(', ')}` : null,
+        }),
+        excel.exportFileName(stamp),
+      )
+    } catch (error) {
+      console.error('The results report could not be written:', error)
+      setDownloadFailed(true)
+    }
   }
 
   return (
@@ -201,6 +214,11 @@ export function Register() {
       </div>
       {loadingRepos > 0 ? (
         <progress className="progress" max={repoCount} value={repoCount - loadingRepos} />
+      ) : null}
+      {downloadFailed ? (
+        <p className="notice notice--bad" role="alert">
+          The results file could not be written. Please try again.
+        </p>
       ) : null}
 
       {shown.length > 0 ? (

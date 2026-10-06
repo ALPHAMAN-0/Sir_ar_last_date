@@ -14,6 +14,8 @@ export function percent(score: number): string {
 /** What the files say, never what the students did. */
 export function tierLabel(tier: Tier): string {
   switch (tier) {
+    case 'same_repo':
+      return 'Same repo'
     case 'almost_all':
       return 'Almost all identical'
     case 'most':
@@ -29,6 +31,7 @@ export function tierLabel(tier: Tier): string {
 
 export function tierTone(tier: Tier): 'bad' | 'warn' | 'info' | 'muted' {
   switch (tier) {
+    case 'same_repo':
     case 'almost_all':
       return 'bad'
     case 'most':

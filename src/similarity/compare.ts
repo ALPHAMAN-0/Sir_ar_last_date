@@ -53,7 +53,7 @@ export function tier({ identical, identicalBytes, score }: Evidence): Tier {
   return 'little'
 }
 
-const TIER_RANK: Record<Tier, number> = { almost_all: 0, most: 1, part: 2, little: 3, thin: 4 }
+const TIER_RANK: Record<Tier, number> = { same_repo: 0, almost_all: 1, most: 2, part: 3, little: 4, thin: 5 }
 
 /** One repo, with its starter files taken out and its own files indexed. */
 type Prepared = {

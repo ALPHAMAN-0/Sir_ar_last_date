@@ -83,6 +83,47 @@ describe('summarise', () => {
     expect(summary.compared).toBe(2)
   })
 
+  it('puts each repo handed in by several people first, as a 100% match, and numbers the rest after it', () => {
+    const summary = build(
+      [
+        group('a/x', who(2, 'Rahim'), who(5, 'Nusrat'), who(7, 'Arif')),
+        group('b/y', who(3, 'Karim')),
+        group('c/z', who(4, 'Salma'), who(6, 'Tanvir')),
+      ],
+      [tree('a/x', work), tree('b/y', work), tree('c/z', { 'solo.js': 'her own' })],
+    )
+    expect(summary.pairs.map((pair) => [pair.number, pair.kind, pair.a.repo, pair.b.repo, pair.summary.score, pair.summary.tier])).toEqual([
+      [1, 'same_repo', 'a/x', 'a/x', 1, 'same_repo'],
+      [2, 'same_repo', 'c/z', 'c/z', 1, 'same_repo'],
+      [3, 'repos', 'a/x', 'b/y', 1, 'almost_all'],
+    ])
+    // Every file of the repo counts as identical: it is the same repo.
+    expect(summary.pairs[0].summary).toMatchObject({ identical: 3, aOwn: 3, aShare: 1, identicalBytes: 6000 })
+  })
+
+  it('names the repo of every closest match', () => {
+    const summary = build(
+      [group('a/x', who(2, 'Rahim'), who(4, 'Nusrat')), group('b/y', who(3, 'Karim'))],
+      [tree('a/x', work), tree('b/y', work)],
+    )
+    const closest = Object.fromEntries(summary.people.map((line) => [line.person.name, line.closest]))
+    expect(closest.Rahim).toEqual({ label: 'Same repo as ID-4 · Nusrat', repo: 'a/x', score: 1, tier: 'same_repo' })
+    expect(closest.Nusrat).toEqual({ label: 'Same repo as ID-2 · Rahim', repo: 'a/x', score: 1, tier: 'same_repo' })
+    expect(closest.Karim).toEqual({ label: 'ID-2 · Rahim, ID-4 · Nusrat', repo: 'a/x', score: 1, tier: 'almost_all' })
+    // The same repo and the copy in another repo both count as strong.
+    expect(summary.people.find((line) => line.person.name === 'Rahim')?.strongPairs).toBe(2)
+  })
+
+  it('still calls a shared repo a 100% match when its files could not be read', () => {
+    const summary = build(
+      [group('a/x', who(2, 'Rahim'), who(3, 'Nusrat'))],
+      [],
+      { 'a/x': { kind: 'not_found', message: 'GitHub no longer shows this repo.' } },
+    )
+    expect(summary.pairs).toHaveLength(1)
+    expect(summary.pairs[0].summary).toMatchObject({ score: 1, identical: 0, tier: 'same_repo' })
+  })
+
   it('accounts for every row that could not be compared, with the reason', () => {
     const summary = build(
       [group('a/x', who(2, 'Rahim')), group('b/gone', who(3, 'Karim'), who(6, 'Nayeem')), group('c/assets', who(4, 'Salma'))],
