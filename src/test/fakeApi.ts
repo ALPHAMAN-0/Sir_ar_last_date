@@ -60,7 +60,7 @@ export type FakeApi = {
   /** Changed files by commit id; later pages under `${sha}#${page}`. */
   files: Record<string, CommitFilesResponse | Failure>
   /** File lists by repo. */
-  trees: Record<string, TreeFile[]>
+  trees: Record<string, TreeFile[] | Failure>
   /** The quota answer. Null answers 404, which the page quietly ignores. */
   status: StatusResponse | null
 }

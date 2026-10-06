@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ActivityEvent, CommitInfo } from '../../shared/api.ts'
 import { ZERO_OID } from '../../shared/validate.ts'
@@ -77,12 +77,16 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** A fresh store with the saved sheet, and the person on sheet row `rowId`. */
+/**
+ * A fresh store with the saved sheet, and the person on sheet row `rowId`,
+ * opened the usual way: from the register, once the repos have been checked.
+ */
 async function openPerson(rowId: string, before?: (store: typeof import('../state/store.ts')) => void) {
   vi.resetModules()
   const store = await import('../state/store.ts')
   const { PersonView } = await import('./PersonView.tsx')
   store.start()
+  await waitFor(() => expect(store.getState().loadingRepos).toBe(0))
   before?.(store)
   render(<PersonView rowId={rowId} />)
   return store
