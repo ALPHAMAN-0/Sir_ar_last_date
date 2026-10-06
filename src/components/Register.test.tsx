@@ -122,7 +122,7 @@ describe('the register', () => {
       expect(pressed(/Not found/)).toBe('true')
       expect(pressed(/Everyone/)).toBe('false')
       expect(names()).toEqual(['Arif Hossain'])
-      expect(screen.getByRole('button', { name: 'Download 1 rows' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Download 1 row' })).toBeTruthy()
 
       // A second click on the same chip shows everyone again.
       fireEvent.click(chip(/Not found/))

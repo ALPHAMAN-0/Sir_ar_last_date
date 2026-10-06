@@ -196,7 +196,7 @@ export function Register() {
           onClick={() => void download()}
           disabled={shown.length === 0}
         >
-          {filtered ? `Download ${shown.length} rows` : 'Download .xlsx'}
+          {filtered ? `Download ${shown.length} ${shown.length === 1 ? 'row' : 'rows'}` : 'Download .xlsx'}
         </button>
       </div>
       {loadingRepos > 0 ? (

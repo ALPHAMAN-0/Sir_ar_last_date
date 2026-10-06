@@ -373,8 +373,10 @@ React, TypeScript and Vite, with the Cloudflare Vite plugin. The Excel library
 (SheetJS) is loaded only when a file is chosen or downloaded.
 
 Every rule that decides something is a pure function with unit tests next to it
-(`*.test.ts`): 233 tests in 17 files. The Worker's tests replace `fetch`, so they
-never call GitHub.
+(`*.test.ts`), and every screen has tests that click through it in a simulated
+browser (`*.test.tsx`, jsdom and Testing Library): 346 tests in 31 files. The
+tests replace `fetch` with a fake API (`src/test/fakeApi.ts` for the page), so
+they never call GitHub.
 
 Not included on purpose: private repos, a login, per-person deadlines, and
 storing sheets on the server.
