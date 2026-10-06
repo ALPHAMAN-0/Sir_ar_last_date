@@ -24,7 +24,7 @@ const row = (over: Partial<ExportRow> = {}): ExportRow => ({
   rowNumber: 2,
   id: '20-41234-1',
   name: 'Rahim Uddin',
-  repoLink: 'https://github.com/rahim/task-1',
+  repoName: 'rahim/task-1',
   repoUrl: 'https://github.com/rahim/task-1',
   status: 'On time',
   statusKey: 'on_time',
@@ -49,14 +49,14 @@ const info: ExportInfo = {
 }
 
 /** A class with one of everything. Everyone has a repo of their own, except A2 and A3. */
-const own = (id: string) => ({ repoUrl: `https://github.com/x/${id}`, repoLink: `https://github.com/x/${id}` })
+const own = (id: string) => ({ repoUrl: `https://github.com/x/${id}`, repoName: `x/${id}` })
 const klass: ExportRow[] = [
   row({ rowNumber: 2, id: 'A1', ...own('A1'), name: 'Rahim' }),
-  row({ rowNumber: 3, id: 'A2', name: 'Nusrat', repoUrl: 'https://github.com/x/shared', repoLink: 'https://github.com/x/shared' }),
-  row({ rowNumber: 4, id: 'A3', name: 'Tanvir', repoUrl: 'https://github.com/x/shared', repoLink: 'https://github.com/x/shared' }),
+  row({ rowNumber: 3, id: 'A2', name: 'Nusrat', repoUrl: 'https://github.com/x/shared', repoName: 'x/shared' }),
+  row({ rowNumber: 4, id: 'A3', name: 'Tanvir', repoUrl: 'https://github.com/x/shared', repoName: 'x/shared' }),
   row({ rowNumber: 5, id: 'A4', ...own('A4'), name: 'Farhana', status: 'Late', statusKey: 'late', lateBy: '3h 20m', lateMinutes: 200 }),
   row({ rowNumber: 6, id: 'A5', ...own('A5'), name: 'Sabbir', status: 'Changed after deadline', statusKey: 'changed_after', lateBy: '9h' }),
-  row({ rowNumber: 7, id: 'A6', name: 'Karim', status: 'Invalid link', statusKey: 'invalid_link', repoUrl: null, repoLink: 'will send later' }),
+  row({ rowNumber: 7, id: 'A6', name: 'Karim', status: 'Invalid link', statusKey: 'invalid_link', repoUrl: null, repoName: 'will send later' }),
   row({ rowNumber: 8, id: 'A7', ...own('A7'), name: 'Lamia', status: 'Not found', statusKey: 'not_found' }),
   row({ rowNumber: 9, id: 'A8', ...own('A8'), name: 'Rakib', needsReview: true, notes: 'Main branch was created after the deadline' }),
 ]
@@ -71,6 +71,12 @@ function roundTrip(rows: ExportRow[], details = info) {
 
 const fill = (cell: XLSX.CellObject | undefined) => (cell?.s as { fgColor?: { rgb?: string } } | undefined)?.fgColor?.rgb
 
+/** The colours found in one row, from column A to `last`. One colour means the whole row has it. */
+function rowFills(sheet: XLSX.WorkSheet, r: number, last: string): Array<string | undefined> {
+  const columns = Array.from({ length: XLSX.utils.decode_col(last) + 1 }, (_, c) => XLSX.utils.encode_col(c))
+  return [...new Set(columns.map((column) => fill(sheet[`${column}${r}`])))]
+}
+
 /** The XML of the n-th sheet inside the file. */
 function sheetXml(bytes: Uint8Array, n: number): string {
   const zip = XLSX.CFB.read(bytes, { type: 'array' })
@@ -79,8 +85,15 @@ function sheetXml(bytes: Uint8Array, n: number): string {
 }
 
 describe('the results report', () => {
-  it('starts with a summary, then the results, what needs attention, shared repos and info', () => {
-    expect(roundTrip(klass).book.SheetNames).toEqual(['Summary', 'Results', 'Needs attention', 'Same repo', 'Info'])
+  it('opens on the results, then has a summary, what needs attention, shared repos and info', () => {
+    expect(roundTrip(klass).book.SheetNames).toEqual(['Results', 'Summary', 'Needs attention', 'Same repo', 'Info'])
+  })
+
+  it('has the columns of the register in the register\'s order, then the extra ones', () => {
+    expect(roundTrip([row()]).grid('Results')[0]).toEqual([
+      'Row', 'ID', 'Name', 'Repo', 'Status', 'Notes', 'Late by', 'Repo created', 'Last push', 'Last commit', 'Commits',
+      'Late (minutes)', 'Last on-time push', 'Branch',
+    ])
   })
 
   it('counts every status, with its share, and says what needs a look', () => {
@@ -122,8 +135,9 @@ describe('the results report', () => {
     expect([results.B2.v, results.B3.v, results.B4.v]).toEqual(['B', 'A', 'C'])
   })
 
-  it('makes repo links clickable, but never a cell that is not a validated link', () => {
-    const { results } = roundTrip([row(), row({ repoUrl: null, repoLink: 'will send later', statusKey: 'invalid_link' })])
+  it('names the repo as the page does and makes it clickable, but never a cell that is not a validated link', () => {
+    const { results } = roundTrip([row(), row({ repoUrl: null, repoName: 'will send later', statusKey: 'invalid_link' })])
+    expect(results.D2.v).toBe('rahim/task-1')
     expect(results.D2.l?.Target).toBe('https://github.com/rahim/task-1')
     expect(results.D3.v).toBe('will send later')
     expect(results.D3.l).toBeUndefined()
@@ -136,26 +150,68 @@ describe('the results report', () => {
     expect(fill(results.E5)).toBe('F6CDC8') // Late
     expect(fill(results.E6)).toBe('FBE6B3') // Changed after deadline
     expect(fill(results.E7)).toBe('E6E6E6') // Invalid link
-    expect(fill(results.C2)).toBeUndefined()
-    const xml = sheetXml(bytes, 2)
+    const xml = sheetXml(bytes, 1)
     expect(xml).toContain('state="frozen"')
     expect(xml).toContain('<autoFilter ref="A1:N9"/>')
   })
 
-  it('writes dates as real Excel dates in local wall-clock time', () => {
+  it('colours the whole row of a person, blank cells and dates included', () => {
+    process.env.TZ = 'Asia/Dhaka'
+    const { results } = roundTrip(klass)
+    expect(rowFills(results, 2, 'N')).toEqual(['D4EFDB']) // On time
+    expect(rowFills(results, 5, 'N')).toEqual(['F6CDC8']) // Late
+    expect(rowFills(results, 6, 'N')).toEqual(['FBE6B3']) // Changed after deadline
+    expect(rowFills(results, 7, 'N')).toEqual(['E6E6E6']) // Invalid link
+    expect(rowFills(results, 8, 'N')).toEqual(['E6E6E6']) // Not found
+    // A coloured date is still a date, and a coloured link still a link.
+    expect(results.I5.w).toBe('05 Oct 2026, 21:10')
+    expect(results.D5.l?.Target).toBe('https://github.com/x/A4')
+  })
+
+  it('colours an empty repo red and "Has work" blue, and leaves a row still being checked white', () => {
+    const { results } = roundTrip([
+      row({ status: 'No submission', statusKey: 'no_submission' }),
+      row({ status: 'Has work', statusKey: 'submitted' }),
+      row({ status: 'Checking', statusKey: 'checking' }),
+    ])
+    expect(rowFills(results, 2, 'N')).toEqual(['F6CDC8'])
+    expect(rowFills(results, 3, 'N')).toEqual(['DCE8F7'])
+    expect(rowFills(results, 4, 'N')).toEqual([undefined])
+  })
+
+  it('colours whole rows on the "Needs attention" sheet too', () => {
+    const attention = roundTrip(klass).book.Sheets['Needs attention']
+    expect(rowFills(attention, 1, 'H')).toEqual(['E9E4D6']) // the header
+    expect(rowFills(attention, 2, 'H')).toEqual(['F6CDC8']) // Farhana, late
+    expect(rowFills(attention, 3, 'H')).toEqual(['FBE6B3']) // Sabbir, changed after deadline
+    expect(rowFills(attention, 4, 'H')).toEqual(['E6E6E6']) // Lamia, not found
+  })
+
+  it('colours no row on the sheets that are not one row per person', () => {
+    const { book } = roundTrip(klass)
+    expect(rowFills(book.Sheets['Same repo'], 2, 'F')).toEqual([undefined])
+    // On the summary only the name of a status carries its colour.
+    const summary = book.Sheets.Summary
+    const late = Object.keys(summary).find((address) => address.startsWith('A') && summary[address].v === 'Late')
+    expect(fill(summary[late as string])).toBe('F6CDC8')
+    expect(fill(summary[(late as string).replace('A', 'B')])).toBeUndefined()
+  })
+
+  it('writes dates as real Excel dates in local wall-clock time, shown the way the page shows them', () => {
     process.env.TZ = 'Asia/Dhaka'
     const { results } = roundTrip([row()])
     // 15:10 UTC is 21:10 in Dhaka.
-    expect(results.J2.t).toBe('n')
-    expect(XLSX.SSF.format('yyyy-mm-dd hh:mm', results.J2.v)).toBe('2026-10-05 21:10')
-    expect(results.M2).toMatchObject({ t: 'n', v: 12 })
+    expect(results.I2.t).toBe('n')
+    expect(XLSX.SSF.format('yyyy-mm-dd hh:mm', results.I2.v)).toBe('2026-10-05 21:10')
+    expect([results.H2.w, results.I2.w, results.J2.w]).toEqual(['01 Oct 2026, 10:00', '05 Oct 2026, 21:10', '05 Oct 2026, 21:09'])
+    expect(results.K2).toMatchObject({ t: 'n', v: 12 })
   })
 
   it('never writes a formula, even when a cell starts with "="', () => {
     const { results } = roundTrip([
       row({ name: '=HYPERLINK("https://evil.example","click")', notes: '+1+1', id: '@SUM(A1)' }),
     ])
-    for (const address of ['B2', 'C2', 'H2']) {
+    for (const address of ['B2', 'C2', 'F2']) {
       expect(results[address].t, address).toBe('s')
       expect(results[address].f, address).toBeUndefined()
     }
@@ -166,15 +222,15 @@ describe('the results report', () => {
     const { results } = roundTrip([
       row({ status: 'Late', statusKey: 'late', lateBy: '3h 20m', lateMinutes: 200, commits: null }),
     ])
-    expect(results.F2.v).toBe('3h 20m')
-    expect(results.G2).toMatchObject({ t: 'n', v: 200 })
-    expect(results.K2?.v ?? '').toBe('')
+    expect(results.G2.v).toBe('3h 20m')
+    expect(results.L2).toMatchObject({ t: 'n', v: 200 })
     expect(results.M2?.v ?? '').toBe('')
+    expect(results.K2?.v ?? '').toBe('')
   })
 
   it('lists who needs attention, most urgent first, with what to do', () => {
     const attention = roundTrip(klass).grid('Needs attention')
-    expect(attention[0]).toEqual(['Row', 'ID', 'Name', 'Repo link', 'Status', 'Late by', 'What to do', 'Notes'])
+    expect(attention[0]).toEqual(['Row', 'ID', 'Name', 'Repo', 'Status', 'Late by', 'What to do', 'Notes'])
     expect(attention.slice(1).map((line) => line[2])).toEqual(['Farhana', 'Sabbir', 'Lamia', 'Karim', 'Rakib'])
     expect(attention[1][6]).toBe('Nothing had reached GitHub by the deadline. The first push came 3h 20m after it.')
     expect(attention[5][6]).toBe('Worth a look yourself: see the notes.')
@@ -197,7 +253,7 @@ describe('the results report', () => {
   it('records the deadline, check time, zone and what each status means', () => {
     process.env.TZ = 'Asia/Dhaka'
     const { about, grid } = roundTrip([row()])
-    expect(XLSX.SSF.format('yyyy-mm-dd hh:mm', about.B2.v)).toBe('2026-10-05 23:59')
+    expect(about.B2.w).toBe('05 Oct 2026, 23:59')
     expect(about.B4.v).toBe('Asia/Dhaka (UTC+6)')
     expect(grid('Info').map((line) => line[0])).toContain('Status: Changed after deadline')
     expect(roundTrip([row()], { ...info, deadline: null }).about.B2.v).toBe('No deadline set')
@@ -224,8 +280,8 @@ describe('helpers', () => {
     const groups = sameRepoGroups([
       row({ rowNumber: 5, repoUrl: 'https://github.com/a/b' }),
       row({ rowNumber: 2, repoUrl: 'https://github.com/a/b' }),
-      row({ repoUrl: null, repoLink: 'same text' }),
-      row({ repoUrl: null, repoLink: 'same text' }),
+      row({ repoUrl: null, repoName: 'same text' }),
+      row({ repoUrl: null, repoName: 'same text' }),
     ])
     expect(groups).toHaveLength(1)
     expect(groups[0].rows.map((line) => line.rowNumber)).toEqual([2, 5])
@@ -246,6 +302,6 @@ describe('helpers', () => {
     downloadWorkbook(buildWorkbook([row()], info), 'results.xlsx', save)
     const [bytes, name] = save.mock.calls[0]
     expect(name).toBe('results.xlsx')
-    expect(XLSX.read(bytes, { type: 'array' }).SheetNames[0]).toBe('Summary')
+    expect(XLSX.read(bytes, { type: 'array' }).SheetNames[0]).toBe('Results')
   })
 })

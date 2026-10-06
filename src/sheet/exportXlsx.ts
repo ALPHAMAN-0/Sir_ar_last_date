@@ -86,20 +86,31 @@ const tonePaint = (status: Status): Paint | null => {
   const tone = STATUS_TONE[status]
   return tone === 'busy' ? null : tone
 }
+/** A person's row has the colour of their status. A row still being checked has none. */
+const statusPaint = (row: ExportRow): Paint | null => tonePaint(row.statusKey)
 
-type Column<Row> = { title: string; width: number; cell: (row: Row) => XLSX.CellObject; paint?: (row: Row) => Paint | null }
+type Column<Row> = { title: string; width: number; cell: (row: Row) => XLSX.CellObject }
 
-/** A sheet with a header row, column widths and a filter button on every column. */
-function table<Row>(columns: ReadonlyArray<Column<Row>>, rows: readonly Row[]): { sheet: XLSX.WorkSheet; style: SheetStyle } {
+/**
+ * A sheet with a header row, column widths and a filter button on every column.
+ * `paint` colours a whole row, blank cells included, so the colour is still in
+ * view after scrolling right to the dates.
+ */
+function table<Row>(
+  columns: ReadonlyArray<Column<Row>>,
+  rows: readonly Row[],
+  paint?: (row: Row) => Paint | null,
+): { sheet: XLSX.WorkSheet; style: SheetStyle } {
   const sheet: XLSX.WorkSheet = {}
   const cells = headerCells(columns.length)
+  const paints = rows.map((row) => paint?.(row) ?? null)
   columns.forEach((column, c) => {
     sheet[XLSX.utils.encode_cell({ r: 0, c })] = text(column.title)
     rows.forEach((row, r) => {
       const address = XLSX.utils.encode_cell({ r: r + 1, c })
       sheet[address] = column.cell(row)
-      const paint = column.paint?.(row)
-      if (paint) cells.set(address, paint)
+      const tone = paints[r]
+      if (tone) cells.set(address, tone)
     })
   })
   const ref = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(rows.length, 1), c: columns.length - 1 } })
@@ -114,7 +125,7 @@ const RESULT_COLUMNS: ReadonlyArray<Column<ExportRow>> = [
   { title: 'ID', width: 16, cell: (row) => text(row.id) },
   { title: 'Name', width: 26, cell: (row) => text(row.name) },
   { title: 'Repo link', width: 44, cell: link },
-  { title: 'Status', width: 24, cell: (row) => text(row.status), paint: (row) => tonePaint(row.statusKey) },
+  { title: 'Status', width: 24, cell: (row) => text(row.status) },
   { title: 'Late by', width: 12, cell: (row) => text(row.lateBy) },
   { title: 'Late (minutes)', width: 14, cell: (row) => number(row.lateMinutes) },
   { title: 'Notes', width: 44, cell: (row) => text(row.notes) },
@@ -164,7 +175,7 @@ const ATTENTION_COLUMNS: ReadonlyArray<Column<ExportRow>> = [
   { title: 'ID', width: 16, cell: (row) => text(row.id) },
   { title: 'Name', width: 26, cell: (row) => text(row.name) },
   { title: 'Repo link', width: 44, cell: link },
-  { title: 'Status', width: 24, cell: (row) => text(row.status), paint: (row) => tonePaint(row.statusKey) },
+  { title: 'Status', width: 24, cell: (row) => text(row.status) },
   { title: 'Late by', width: 12, cell: (row) => text(row.lateBy) },
   { title: 'What to do', width: 70, cell: (row) => text(whatToDo(row)) },
   { title: 'Notes', width: 44, cell: (row) => text(row.notes) },
@@ -353,9 +364,9 @@ function infoSheet(info: ExportInfo): XLSX.WorkSheet {
 /** Builds the workbook and the colours that go with it. Rows keep the order they are given in. */
 export function buildWorkbook(rows: readonly ExportRow[], info: ExportInfo): ResultsReport {
   const summary = summarySheet(rows, info)
-  const results = table(RESULT_COLUMNS, rows)
+  const results = table(RESULT_COLUMNS, rows, statusPaint)
   const attentionRows = needsAttention(rows)
-  const attention = table(ATTENTION_COLUMNS, attentionRows)
+  const attention = table(ATTENTION_COLUMNS, attentionRows, statusPaint)
   if (attentionRows.length === 0) attention.sheet.A2 = text('Nobody needs attention.')
   const groups = sameRepoGroups(rows)
   const same = table(SAME_REPO_COLUMNS, groups)

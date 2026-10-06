@@ -155,10 +155,11 @@ screen. When a filter or a search is on, the Summary says so ("3 of 15").
 | Same repo | repo handed in by several people | their IDs, names, sheet rows and statuses |
 | Info | | how lateness is judged and what each status means |
 
-Each status has its colour (green on time, amber changed, red late or empty, grey
-missing), header rows are bold and stay in view while scrolling, and every
-column has a filter button. Dates are real Excel dates; names are plain text,
-never formulas.
+On the Results and Needs attention sheets a person's whole row has the colour of
+their status: green on time, yellow changed after the deadline, red late or
+empty, grey missing. Header rows are bold and stay in view while scrolling, and
+every column has a filter button. Dates are real Excel dates; names are plain
+text, never formulas.
 
 ## The similarity check
 
@@ -395,7 +396,7 @@ React, TypeScript and Vite, with the Cloudflare Vite plugin. The Excel library
 
 Every rule that decides something is a pure function with unit tests next to it
 (`*.test.ts`), and every screen has tests that click through it in a simulated
-browser (`*.test.tsx`, jsdom and Testing Library): 374 tests in 32 files. The
+browser (`*.test.tsx`, jsdom and Testing Library): 378 tests in 32 files. The
 tests replace `fetch` with a fake API (`src/test/fakeApi.ts` for the page), so
 they never call GitHub.
 

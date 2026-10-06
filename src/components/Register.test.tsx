@@ -137,7 +137,7 @@ describe('the register', () => {
 
       expect(saved[0].name).toMatch(/^results-\d{4}-\d{2}-\d{2}-\d{4}\.xlsx$/)
       const book = XLSX.read(saved[0].bytes, { type: 'array' })
-      expect(book.SheetNames).toEqual(['Summary', 'Results', 'Needs attention', 'Same repo', 'Info'])
+      expect(book.SheetNames).toEqual(['Results', 'Summary', 'Needs attention', 'Same repo', 'Info'])
       const summary = XLSX.utils.sheet_to_json<unknown[]>(book.Sheets.Summary, { header: 1 })
       expect(summary.find((line) => line[0] === 'People in this file')?.[1]).toBe(
         '1 of 4 (filtered by Status: Not found)',

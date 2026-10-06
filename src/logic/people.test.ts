@@ -164,11 +164,13 @@ describe('labels and links', () => {
       ['Tania', 'Invalid link'],
       ['Zahid', 'On time'],
     ])
-    expect(rows[2]).toMatchObject({ commits: 12, branch: 'main', repoLink: 'https://github.com/rahim/task' })
+    // The repo is named as the page names it, and linked by its validated address.
+    expect(rows[2]).toMatchObject({ commits: 12, branch: 'main', repoName: 'Rahim/Task', repoUrl: 'https://github.com/rahim/task' })
+    expect(rows[1]).toMatchObject({ repoName: 'nadia/task', repoUrl: 'https://github.com/nadia/task' })
     // An empty repo has no commits and no push worth reporting.
     expect(rows[3]).toMatchObject({ commits: null, lastPushAt: null })
     // A bad link is exported as it was typed.
-    expect(rows[4].repoLink).toBe('not a link at all')
+    expect(rows[4]).toMatchObject({ repoName: 'not a link at all', repoUrl: null })
   })
 })
 
