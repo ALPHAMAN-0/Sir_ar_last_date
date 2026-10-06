@@ -1,8 +1,8 @@
 # Sir_ar_last_date — work status
 
-Updated 2026-10-06. The app is built and online. The similarity rewrite of
-2026-10-06 is committed and was tested against real GitHub on a local Worker,
-but it is not deployed yet: the live site still compares file names only.
+Updated 2026-10-06. The app is built and online at
+https://sir-ar-last-date.sir-last-date.workers.dev, including the similarity
+rewrite (deployed 2026-10-06, version 4f73fa07).
 
 ## Done
 - [x] Server (`worker/`): GitHub client with quota reserve and back-off, six routes,
@@ -27,11 +27,17 @@ but it is not deployed yet: the live site still compares file names only.
 - [x] CI on GitHub Actions: lint, tests and build on every push and pull request.
 - [x] `npm run coverage`; coverage output is no longer committed.
 - [x] README with diagrams.
+- [x] Deployed 2026-10-06 and checked live: security headers present, edge cache
+      answers a repeat (`cf-cache-status: HIT`), `/api/v1/tree` works, an uncached
+      request from another site gets 403, and the token is in no response and no
+      built file.
 
 ## Not done
-- [ ] Run `npm run deploy` so the live site gets the similarity rewrite and `/api/v1/tree`.
-- [ ] After deploy: confirm an edge cache hit, a 429 from the rate limiter, and that
-      the token appears in no response and no built file.
+- [ ] The per-visitor rate limiter did not trigger on the live site: 107 different
+      `/repos` requests from one address in under a minute (limit 40) all got 200.
+      Cloudflare calls the limiter "permissive, eventually consistent", but 2.7x is
+      a lot. Find out why. Until then the quota reserve (stop at 500 left) is the
+      only brake, so one visitor could use up the hour for everyone.
 - [ ] Test the register against real GitHub with a deadline (expected: AboutMe reads
       "Changed after deadline" for a deadline of 2026-09-25 13:00 Dhaka time; a private
       repo reads "Not found").

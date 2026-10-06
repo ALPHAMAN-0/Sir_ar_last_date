@@ -142,7 +142,8 @@ export function saveSheet(
       truncated: false,
       rows: rows.map(([id, name, link], index) => [index + 2, id, name, link]),
       deadlineInput: options.deadlineInput ?? '',
-      sort: options.sort ?? { column: 'row', descending: false },
+      // Left out, the register keeps its own default order: newest push first.
+      sort: options.sort,
     }),
   )
 }
