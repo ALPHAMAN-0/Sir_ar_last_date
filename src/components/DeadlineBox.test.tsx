@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { STORAGE_KEY } from '../test/fakeApi.ts'
 
 async function setup() {
   vi.resetModules()
@@ -64,15 +63,16 @@ describe('DeadlineBox', () => {
     expect(store.getState().deadline).not.toBeNull()
   })
 
-  it('remembers the applied deadline, not what is still being typed', async () => {
+  it('keeps the applied deadline in force while a new one is typed', async () => {
     await setup()
     type('2020-01-15T23:59')
     fireEvent.click(screen.getByRole('button', { name: 'Set deadline' }))
     type('2020-01-16T10:00')
-    // Without a sheet the store saves nothing; this only checks the button.
     expect((screen.getByRole('button', { name: 'Change deadline' }) as HTMLButtonElement).disabled).toBe(false)
     expect(stateLine().textContent).toContain('15 Jan 2020, 23:59')
-    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change deadline' }))
+    expect(stateLine().textContent).toContain('16 Jan 2020, 10:00')
   })
 
   it('will not apply a value it cannot read', async () => {
