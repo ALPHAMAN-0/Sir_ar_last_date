@@ -130,20 +130,16 @@ export type RowCells = [id: string, name: string, link: string]
  * Saves a sheet the way the store does, so `start()` restores it. The first
  * person is on sheet row 2, below the header, so their route is `#/p/r2`.
  */
-export function saveSheet(
-  rows: RowCells[],
-  options: { fileName?: string; deadlineInput?: string; sort?: { column: string; descending: boolean } } = {},
-): void {
+export function saveSheet(rows: RowCells[], options: { deadlineInput?: string } = {}): void {
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
-      fileName: options.fileName ?? 'class-7.xlsx',
+      fileName: 'class-7.xlsx',
       sheetName: 'Sheet1',
       truncated: false,
       rows: rows.map(([id, name, link], index) => [index + 2, id, name, link]),
       deadlineInput: options.deadlineInput ?? '',
-      // Left out, the register keeps its own default order: newest push first.
-      sort: options.sort,
+      // No saved order, so the register starts with its own: newest push first.
     }),
   )
 }
