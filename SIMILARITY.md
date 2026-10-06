@@ -1,5 +1,14 @@
 # Plagiarism / Similarity Checker — Plan
 
+> **Iteration 8 replaced the design described below.** The checker now compares
+> file *contents* (git's content hash), not file names, and its file lists come
+> through the Worker's `/api/v1/tree`. The sections from "Context" to "Phases"
+> are kept as the record of iterations 0 to 7; where they say "file-name
+> overlap", "Jaccard", "no token" or "the Worker is unchanged", they describe
+> the old design. The current behaviour is documented in
+> [README.md](README.md#the-similarity-check) and in the log entry for
+> iteration 8 at the end of this file.
+
 This is an **iteration plan**, not a one-shot spec. Each section has a
 "Status" line you'll update as the design and code evolve. The plan is
 kept in one file at this path; you and I edit it in place when something
@@ -66,9 +75,9 @@ changing the plan.
 
 | Field | Value |
 | --- | --- |
-| Iteration | 7 (Phase 5 done; tests 183/183, lint clean, build clean) |
-| Last update | 2026-10-05 |
-| Decisions locked | scope=browser-only, math=file-name-overlap, pairs=N×N, report=browser+xlsx |
+| Iteration | 8 (content comparison; tests 233/233, lint clean, build clean) |
+| Last update | 2026-10-06 |
+| Decisions locked | compare=identical content (git blob hash), file lists=through the Worker, pairs=only repos that share a content, report=browser+xlsx |
 | Open questions | see **Open questions** at the bottom |
 
 Update this table whenever a section changes.
@@ -389,15 +398,22 @@ questions** section at the bottom.
 
 ## Open questions (to revisit after each phase)
 
-1. **Content-level matching?** For now we only compare paths. Should
-   we add an opt-in "also compare file SHAs" pass? (Each repo's tree
-   already returns SHAs; comparing SHAs across overlapping paths
-   catches exact copies of unchanged files.)
-2. **What threshold should the "Suspicious" chip use?** Current default
-   is ≥80%. The instructor may want to tune it.
-3. **Should we show the actual paths in the comparison, or just the
-   count?** Showing paths is more useful but exposes repo structure.
-4. **Branches: only default branch, or every branch?** Default-only
+1. ~~**Content-level matching?**~~ Answered in iteration 8: yes, and it
+   replaced path matching. Hashes are compared across all paths, so a
+   renamed copy is found too.
+2. **Edited copies.** A file changed by one character has another hash.
+   Catching that needs the file contents and a token-level comparison
+   (winnowing, as MOSS does). The contents would have to come through a
+   new, size-capped Worker route.
+3. **Starter code named by the teacher.** The starter-file limit is a
+   guess from counts. A "starter repo" field would let the teacher name
+   the handed-out code exactly; every content in that repo would then be
+   left out.
+4. **Which commit to compare?** Today it is the head of the main branch.
+   For "Changed after deadline" rows the register already knows the
+   commit at the deadline; comparing that one would show what was handed
+   in on time.
+5. **Branches: only default branch, or every branch?** Default-only
    keeps it cheap. Multi-branch would require N more tree calls per
    repo.
 
@@ -469,3 +485,50 @@ Update this on every change to the plan.
   lines / 100% functions. The "Download .xlsx" button lives in
   `SimilarityView` under the summary; it uses `useNow()` to avoid
   the React Compiler purity rule. Lint and build clean.
+- **2026-10-06, iteration 8**: the checker was tested against real repos
+  and rebuilt. What the test found in iteration 7's code:
+  - Seven unrelated people's todo apps scored 27% to 67% ("Similar",
+    "Some overlap") because they share file *names* such as
+    `src/App.jsx`. Edited and unedited forks both scored 100%.
+  - People who handed in the very same repo were dropped: the demo sheet
+    (13 people, 3 repos) read "3 of 13 trees fetched", showed three
+    names, and its Info sheet said 78 pairs were compared when 3 were.
+  - "Download .xlsx" threw `Text length must not exceed 32767 characters`
+    and saved nothing as soon as one repo had `node_modules` committed
+    (2 of 12 sampled student repos did).
+  - `/api/v1/tree` allowed 40 requests a minute and the page never asked
+    again, so every repo past the 40th was dropped (reproduced on the
+    local Worker: 25 of 50 requests refused).
+  - The Worker parsed listings of any size (1.9 MB for one sampled repo)
+    and cached them for 60 s although a commit id never changes.
+  - `report.ts` was imported statically, which put the Excel library
+    into the main bundle (769 kB; 295 kB now that it is loaded on demand).
+
+  What changed:
+  - `worker/routes/tree.ts` returns `{ path, sha, size }` per file, caps
+    the listing at 1 MB (`tooLarge`), can list one folder level
+    (`flat=1`), and is cached as immutable. `RL_TREE` is 120 a minute.
+  - New `src/similarity/rules.ts`: third-party and build folders, tool
+    files, pictures, compiled files and files under 64 bytes are never
+    compared. Checked on the sampled repos: without the rules, all 20
+    contents that unrelated repos shared were scaffold files.
+  - `compare.ts` is new: a content held by more repos than the limit
+    (a fifth of the repos, 4 to 10) is a starter file and is left out of
+    both sides; pairs come from an index by content, so only repos that
+    share something are measured; each pair gets a share of A, a share
+    of B and a label. Only numbers cross the Web Worker boundary; file
+    lists per pair are worked out when a pair is opened.
+  - `trees.ts` uses the page's request queue, waits out "too many
+    requests", and walks an oversized repo folder by folder without
+    opening `node_modules` and the like.
+  - `run.ts` groups rows by repo, so a repo handed in by several people
+    is a finding of its own, and keeps a reason for every row left out.
+    `summary.ts` builds what the screen and the report both show.
+  - `report.ts` writes six sheets (Pairs, Matching files, Same repo,
+    People, Starter files, Info), one file per row instead of long
+    cells, and is loaded only when Download is pressed.
+  - Verified end to end on the local Worker against real GitHub with
+    three sheets (the demo sheet, 16 real repos including one with
+    6,232 files, and 55 forks of one repo), on the dev server and on
+    the production build with its security policy. The downloaded
+    workbook opens in LibreOffice. 233 tests pass; lint and build clean.

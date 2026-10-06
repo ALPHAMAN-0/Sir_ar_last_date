@@ -1,52 +1,89 @@
-// Page-side glue: given the repos from the store and a fetcher
-// configuration, fetch every tree (from trees.ts) and then run the
-// comparison (from compare.worker.ts). Returns the pairs and any
-// per-repo errors so the UI can show them.
+// Decides who takes part in the comparison. People are compared repo by repo,
+// so the sheet's rows are first grouped by the repo they point to. A row that
+// cannot take part is kept with its reason: the report accounts for every row.
 
-import type { RepoOk } from '../../shared/api.ts'
-import { compareAll } from './compare.ts'
-import { fetchAll, type FetchAllOptions, type FetchAllResult, type TreeError } from './trees.ts'
-import type { FileTree, Pair } from './types.ts'
+import { apiRepoName } from '../logic/repoName.ts'
+import { LINK_PROBLEM_TEXT } from '../sheet/parseRepoLink.ts'
+import type { PersonRow } from '../state/store.ts'
+import type { TreeInput } from './trees.ts'
 
-export type RunOptions = FetchAllOptions & {
-  /**
-   * Inject a different comparison strategy. Defaults to running
-   * compareAll on a Web Worker; tests inject the in-thread function.
-   */
-  compare?: (trees: Map<string, FileTree>) => Pair[]
+export type Person = { rowId: string; rowNumber: number; id: string; name: string }
+
+/** One repo and everybody who handed it in. More than one person is a finding of its own. */
+export type RepoGroup = {
+  /** The repo's current `owner/name`, lowercase. Two links to a renamed repo land here together. */
+  repo: string
+  /** As GitHub spells it, for display. */
+  nameWithOwner: string
+  isFork: boolean
+  people: Person[]
 }
 
-export type RunResult = {
-  pairs: Pair[]
-  errors: Map<string, TreeError>
-  trees: Map<string, FileTree>
+export type LeftOut = {
+  person: Person
+  /** What the sheet's link cell holds. */
+  rawLink: string
+  reason: string
 }
 
-/** Repos in the wrong state can't be compared (no head, not public, etc.). */
-export function comparableRepos(repos: readonly RepoOk[]): RepoOk[] {
-  return repos.filter((repo) => repo.headOid !== null && repo.defaultBranch !== null)
+export type Plan = {
+  /** Repos that can be compared, in sheet order. */
+  groups: RepoGroup[]
+  /** What to ask the file-list loader for: one entry per group. */
+  inputs: TreeInput[]
+  leftOut: LeftOut[]
+  /** Rows the register is still checking. The comparison waits for them. */
+  waiting: number
 }
 
-/** Builds the inputs that `fetchAll` wants. */
-export function treeInputs(repos: readonly RepoOk[]): Array<{ repo: string; headOid: string; branch: string }> {
-  return repos.map((repo) => ({
-    repo: repo.key,
-    headOid: repo.headOid as string,
-    branch: repo.defaultBranch as string,
-  }))
+export const LEFT_OUT_TEXT = {
+  not_found: 'Repo not found (private, deleted or mistyped)',
+  check_failed: 'Could not be checked; press Refresh on the register',
+  empty: 'The repo is empty',
+} as const
+
+export function planComparison(people: readonly PersonRow[]): Plan {
+  const groups = new Map<string, RepoGroup>()
+  const inputs: TreeInput[] = []
+  const leftOut: LeftOut[] = []
+  let waiting = 0
+
+  for (const { row, meta } of people) {
+    const person: Person = { rowId: row.rowId, rowNumber: row.rowNumber, id: row.id, name: row.name }
+    const skip = (reason: string) => leftOut.push({ person, rawLink: row.rawLink, reason })
+
+    if (!row.link.ok) {
+      skip(LINK_PROBLEM_TEXT[row.link.reason])
+    } else if (!meta) {
+      waiting++
+    } else if (meta.state === 'not_found') {
+      skip(LEFT_OUT_TEXT.not_found)
+    } else if (meta.state === 'error') {
+      skip(LEFT_OUT_TEXT.check_failed)
+    } else if (meta.isEmpty || !meta.headOid || !meta.defaultBranch) {
+      skip(LEFT_OUT_TEXT.empty)
+    } else {
+      const repo = apiRepoName(meta)
+      let group = groups.get(repo)
+      if (!group) {
+        group = { repo, nameWithOwner: meta.nameWithOwner, isFork: meta.isFork, people: [] }
+        groups.set(repo, group)
+        inputs.push({ repo, headOid: meta.headOid, branch: meta.defaultBranch })
+      }
+      group.people.push(person)
+    }
+  }
+  return { groups: [...groups.values()], inputs, leftOut, waiting }
 }
 
-const defaultCompare = (trees: Map<string, FileTree>): Pair[] => compareAll(trees)
+/** "22-46001-1 · Rahim Uddin", or the row number when the sheet gives neither. */
+export function personLabel(person: Person): string {
+  return [person.id, person.name].filter(Boolean).join(' · ') || `Row ${person.rowNumber}`
+}
 
-/**
- * End-to-end: fetch every tree, then compare. The two steps are kept
- * distinct so it can stream progress ("fetching 12 / 28") before
- * ("comparing 378 pairs").
- */
-export async function runComparison(repos: readonly RepoOk[], options: RunOptions = {}): Promise<RunResult> {
-  const { compare = defaultCompare, ...fetchOptions } = options
-  const inputs = treeInputs(comparableRepos(repos))
-  const fetchResult: FetchAllResult = await fetchAll(inputs, fetchOptions)
-  const pairs = compare(fetchResult.trees)
-  return { pairs, errors: fetchResult.errors, trees: fetchResult.trees }
+/** The people behind one repo: up to `max` by name, then "+3 more". */
+export function groupLabel(group: RepoGroup, max = 2): string {
+  const names = group.people.slice(0, max).map(personLabel)
+  const rest = group.people.length - names.length
+  return rest > 0 ? `${names.join(', ')} +${rest} more` : names.join(', ')
 }

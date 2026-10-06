@@ -1,260 +1,171 @@
-// Fetches the file tree of one repo at one commit. The browser does NOT call
-// `api.github.com` directly: that fails with a CORS preflight error on most
-// non-GitHub origins. Instead it calls our Worker at `/api/v1/tree`, which
-// holds the GitHub token, hits `git/trees/{sha}?recursive=1` server-side, and
-// returns just the blob paths. Caching: one `sessionStorage` entry per
-// (repo, sha) for an hour; the Worker also caches the response for 60 s at
-// Cloudflare's edge.
+// Loads the file list of each repo through the Worker's `/api/v1/tree` and
+// keeps only the files worth comparing (rules.ts).
+//
+// A list is addressed by commit id, so it never changes: it is kept for the
+// session here, for a week in the browser's own cache, and at Cloudflare's edge.
 
-import { treeUrl } from '../../shared/api.ts'
-import type { FileTree } from './types.ts'
+import { treeUrl, type TreeFile, type TreeResponse } from '../../shared/api.ts'
+import { ApiError } from '../api/client.ts'
+import { isSkippedFolder, noSkips, skipReason } from './rules.ts'
+import type { RepoFiles } from './types.ts'
 
-const CACHE_PREFIX = 'sirar:tree:'
-const CACHE_TTL_MS = 60 * 60 * 1000
+/** File lists wait behind the register's own checks (0 and 1) in the request queue. */
+const PRIORITY = 2
+/** How often one request is asked again after "too many requests" before giving up. */
+const MAX_ROUNDS = 4
+/** What one very large repo may cost while it is read folder by folder. */
+const MAX_WALK_REQUESTS = 40
 
-export type TreeError =
-  | { kind: 'http'; status: number; message: string }
-  | { kind: 'truncated'; message: string }
-  | { kind: 'network'; message: string }
-  | { kind: 'malformed'; message: string }
+export type TreeProblem = 'not_found' | 'too_large' | 'limit' | 'unavailable'
+export type TreeError = { kind: TreeProblem; message: string }
+export type TreeInput = { repo: string; headOid: string; branch: string }
+export type Loaded = { trees: Map<string, RepoFiles>; errors: Map<string, TreeError> }
+export type Progress = (done: number, total: number, current: string) => void
+/** The request queue's `get` (api/client.ts). Passed in so tests can replace it. */
+export type Get = <T>(url: string, priority?: number) => Promise<T>
 
-export type FetchedTree =
-  | { ok: true; tree: FileTree; fromCache: boolean }
-  | { ok: false; repo: string; headOid: string; error: TreeError }
+class TooLarge extends Error {}
 
-const cacheKey = (repo: string, sha: string) => `${CACHE_PREFIX}${repo}@${sha}`
-
-type CachedTree = {
-  paths: string[]
-  fetchedAt: string
-  branch: string
-}
-
-function readCache(repo: string, sha: string, now: number, storage: Storage | null): CachedTree | null {
-  if (!storage) return null
-  try {
-    const raw = storage.getItem(cacheKey(repo, sha))
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as CachedTree & { savedAt?: number }
-    if (!Array.isArray(parsed.paths) || typeof parsed.fetchedAt !== 'string') return null
-    if (parsed.savedAt !== undefined && now - parsed.savedAt > CACHE_TTL_MS) return null
-    return parsed
-  } catch {
-    return null
+function toTreeError(error: unknown): TreeError {
+  if (error instanceof TooLarge) {
+    return { kind: 'too_large', message: 'This repo has too many files to list.' }
   }
-}
-
-function writeCache(repo: string, sha: string, value: CachedTree, storage: Storage | null, now: number): void {
-  if (!storage) return
-  try {
-    storage.setItem(cacheKey(repo, sha), JSON.stringify({ ...value, savedAt: now }))
-  } catch {
-    // Storage may be full or blocked. The page still works, just slower.
-  }
-}
-
-type RawTreeResponse = {
-  fetchedAt?: string
-  paths?: string[]
-  truncated?: boolean
-}
-
-export type FetchOptions = {
-  /** Override `fetch` (used in tests). */
-  fetchImpl?: typeof fetch
-  /** Override `sessionStorage` (used in tests). */
-  storage?: Storage | null
-  /** Override the base URL (used in tests). */
-  baseUrl?: string
-  /** Override the clock (used in tests). */
-  now?: () => number
-}
-
-const DEFAULT_BASE = ''
-
-/** Fetches one tree. Returns a discriminated union so the caller can show a real error. */
-export async function fetchTree(
-  repo: string,
-  headOid: string,
-  branch: string,
-  options: FetchOptions = {},
-): Promise<FetchedTree> {
-  const fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init))
-  const baseUrl = options.baseUrl ?? DEFAULT_BASE
-  const now = options.now ?? Date.now
-  const storage =
-    options.storage !== undefined
-      ? options.storage
-      : typeof sessionStorage !== 'undefined'
-        ? sessionStorage
-        : null
-
-  const cached = readCache(repo, headOid, now(), storage)
-  if (cached) {
-    return {
-      ok: true,
-      tree: { repo, branch, headOid, fetchedAt: cached.fetchedAt, paths: cached.paths },
-      fromCache: true,
+  if (error instanceof ApiError) {
+    if (error.status === 404) {
+      return { kind: 'not_found', message: 'GitHub no longer shows this repo. It may be private or deleted now.' }
     }
-  }
-
-  let res: Response
-  try {
-    res = await fetchImpl(`${baseUrl}${treeUrl({ repo, sha: headOid })}`, {
-      headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(8000),
-    })
-  } catch {
-    return { ok: false, repo, headOid, error: { kind: 'network', message: 'Could not reach the server.' } }
-  }
-
-  if (res.status === 404) {
-    return {
-      ok: false,
-      repo,
-      headOid,
-      error: { kind: 'http', status: 404, message: 'Repo or commit not found.' },
+    if (error.code === 'quota_reserved') return { kind: 'limit', message: error.message }
+    if (error.code === 'rate_limited' || error.code === 'github_throttled') {
+      return { kind: 'limit', message: 'Too many requests for now. Press Try again in a minute.' }
     }
+    return { kind: 'unavailable', message: error.message || 'The file list could not be loaded.' }
   }
-  if (res.status === 429) {
-    return {
-      ok: false,
-      repo,
-      headOid,
-      error: { kind: 'http', status: 429, message: 'Too many requests. Please wait a moment.' },
-    }
-  }
-  if (!res.ok) {
-    return {
-      ok: false,
-      repo,
-      headOid,
-      error: { kind: 'http', status: res.status, message: `The server answered ${res.status}.` },
-    }
-  }
-
-  let body: unknown
-  try {
-    body = await res.json()
-  } catch {
-    return {
-      ok: false,
-      repo,
-      headOid,
-      error: { kind: 'malformed', message: 'The server sent an unreadable answer.' },
-    }
-  }
-
-  const r = body as RawTreeResponse
-  if (!r || !Array.isArray(r.paths)) {
-    return {
-      ok: false,
-      repo,
-      headOid,
-      error: { kind: 'malformed', message: 'The server response did not look like a tree.' },
-    }
-  }
-  if (r.truncated === true) {
-    return {
-      ok: false,
-      repo,
-      headOid,
-      error: {
-        kind: 'truncated',
-        message: 'The tree was truncated by GitHub (>100,000 entries). Try a smaller repo.',
-      },
-    }
-  }
-
-  const fetchedAt = typeof r.fetchedAt === 'string' ? r.fetchedAt : new Date().toISOString()
-  writeCache(repo, headOid, { branch, fetchedAt, paths: r.paths }, storage, now())
-  return {
-    ok: true,
-    tree: { repo, branch, headOid, fetchedAt, paths: r.paths },
-    fromCache: false,
-  }
+  return { kind: 'unavailable', message: 'The file list could not be loaded.' }
 }
 
-export type FetchAllInput = {
-  repo: string
-  headOid: string
-  branch: string
+export type TreeLoader = {
+  /** The comparable files of one repo. Asked once per commit, however often it is called. */
+  load(input: TreeInput): Promise<RepoFiles>
+  /** Loads many repos. A repo that fails lands in `errors`; the others still load. */
+  loadAll(inputs: readonly TreeInput[], onProgress?: Progress): Promise<Loaded>
 }
 
-/** Concurrency limit so we do not exhaust the per-IP rate budget at once. */
-const DEFAULT_CONCURRENCY = 4
+export function createTreeLoader(get: Get): TreeLoader {
+  const cache = new Map<string, Promise<RepoFiles>>()
 
-export type FetchAllOptions = FetchOptions & {
-  concurrency?: number
-  onProgress?: (done: number, total: number, current: string) => void
-}
-
-export type FetchAllResult = {
-  trees: Map<string, FileTree>
-  errors: Map<string, TreeError>
-}
-
-/**
- * Fetches many trees in parallel, capped at `concurrency` (default 4).
- * Inputs may repeat; each unique (repo, headOid) is fetched at most once.
- */
-export async function fetchAll(
-  inputs: readonly FetchAllInput[],
-  options: FetchAllOptions = {},
-): Promise<FetchAllResult> {
-  const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY)
-  const trees = new Map<string, FileTree>()
-  const errors = new Map<string, TreeError>()
-  const onProgress = options.onProgress
-
-  const queue: FetchAllInput[] = []
-  const seen = new Set<string>()
-  for (const item of inputs) {
-    const key = `${item.repo}@${item.headOid}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    queue.push(item)
-  }
-
-  let cursor = 0
-  let done = 0
-  const total = queue.length
-
-  const workers: Promise<void>[] = []
-  for (let i = 0; i < Math.min(concurrency, queue.length); i++) {
-    workers.push(
-      (async () => {
-        for (;;) {
-          const index = cursor++
-          if (index >= queue.length) return
-          const item = queue[index]
-          const result = await fetchTree(item.repo, item.headOid, item.branch, options)
-          done++
-          if (result.ok) {
-            trees.set(result.tree.repo, result.tree)
-          } else {
-            errors.set(result.repo, result.error)
-          }
-          onProgress?.(done, total, item.repo)
+  async function ask(url: string): Promise<TreeResponse> {
+    for (let round = 1; ; round++) {
+      try {
+        const body = await get<TreeResponse>(url, PRIORITY)
+        if (!body || !Array.isArray(body.files) || !Array.isArray(body.dirs)) {
+          throw new ApiError(502, 'malformed', 'The server sent an unreadable file list.')
         }
-      })(),
-    )
-  }
-  await Promise.all(workers)
-  return { trees, errors }
-}
-
-/** Removes every cached tree from `sessionStorage`. Useful for the user-facing "Refresh" button. */
-export function clearCache(storage: Storage | null = typeof sessionStorage !== 'undefined' ? sessionStorage : null): void {
-  if (!storage) return
-  try {
-    const toRemove: string[] = []
-    for (let i = 0; i < storage.length; i++) {
-      const key = storage.key(i)
-      if (key && key.startsWith(CACHE_PREFIX)) toRemove.push(key)
+        return body
+      } catch (error) {
+        // "Too many requests" pauses the whole queue. Asking again simply waits
+        // in it until the pause is over, so a big class finishes by itself.
+        const waitable =
+          error instanceof ApiError &&
+          (error.code === 'rate_limited' || error.code === 'github_throttled')
+        if (!waitable || round >= MAX_ROUNDS) throw error
+      }
     }
-    for (const key of toRemove) storage.removeItem(key)
-  } catch {
-    // Ignore; the cache is best-effort.
   }
+
+  /**
+   * For a repo too big to list at once (usually `node_modules` was committed):
+   * open it folder by folder and never open the folders that are not compared.
+   */
+  async function walk(repo: string, rootSha: string): Promise<{ files: TreeFile[]; unopened: number }> {
+    const files: TreeFile[] = []
+    let unopened = 0
+    let requests = 0
+    const open = (sha: string, flat: boolean) => {
+      if (++requests > MAX_WALK_REQUESTS) throw new TooLarge()
+      return ask(treeUrl({ repo, sha, flat }))
+    }
+    const pending = [{ sha: rootSha, prefix: '' }]
+    while (pending.length > 0) {
+      const folder = pending.pop() as { sha: string; prefix: string }
+      const level = await open(folder.sha, true)
+      // A single folder with thousands of entries of its own.
+      if (level.tooLarge) throw new TooLarge()
+      for (const file of level.files) files.push({ ...file, path: folder.prefix + file.path })
+      for (const dir of level.dirs) {
+        if (isSkippedFolder(dir.path)) {
+          unopened++
+          continue
+        }
+        const prefix = `${folder.prefix}${dir.path}/`
+        // Most sub-folders are small: take everything below in one request.
+        const below = await open(dir.sha, false)
+        if (below.tooLarge) pending.push({ sha: dir.sha, prefix })
+        else for (const file of below.files) files.push({ ...file, path: prefix + file.path })
+      }
+    }
+    return { files, unopened }
+  }
+
+  async function list(input: TreeInput): Promise<RepoFiles> {
+    const whole = await ask(treeUrl({ repo: input.repo, sha: input.headOid }))
+    const listed = whole.tooLarge
+      ? await walk(input.repo, input.headOid)
+      : { files: whole.files, unopened: 0 }
+
+    const skipped = noSkips()
+    const files: TreeFile[] = []
+    for (const file of listed.files) {
+      const reason = skipReason(file.path, file.size)
+      if (reason) skipped[reason]++
+      else files.push(file)
+    }
+    files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    return {
+      repo: input.repo,
+      branch: input.branch,
+      headOid: input.headOid,
+      files,
+      skipped,
+      unopened: listed.unopened,
+    }
+  }
+
+  function load(input: TreeInput): Promise<RepoFiles> {
+    const key = `${input.repo}@${input.headOid}`
+    let pending = cache.get(key)
+    if (!pending) {
+      pending = list(input)
+      // A failed load must not be remembered, so the next try asks again.
+      pending.catch(() => cache.delete(key))
+      cache.set(key, pending)
+    }
+    return pending
+  }
+
+  async function loadAll(inputs: readonly TreeInput[], onProgress?: Progress): Promise<Loaded> {
+    const unique = new Map(inputs.map((input) => [input.repo, input]))
+    const trees = new Map<string, RepoFiles>()
+    const errors = new Map<string, TreeError>()
+    let done = 0
+    // All at once: the request queue itself lets only a few run at a time.
+    await Promise.all(
+      [...unique.values()].map(async (input) => {
+        try {
+          trees.set(input.repo, await load(input))
+        } catch (error) {
+          errors.set(input.repo, toTreeError(error))
+        }
+        onProgress?.(++done, unique.size, input.repo)
+      }),
+    )
+    // Keep sheet order, whatever order the answers came in.
+    const ordered = new Map<string, RepoFiles>()
+    for (const repo of unique.keys()) {
+      const tree = trees.get(repo)
+      if (tree) ordered.set(repo, tree)
+    }
+    return { trees: ordered, errors }
+  }
+
+  return { load, loadAll }
 }

@@ -1274,44 +1274,6 @@ th.is-number .sort {
     grid-column: 2;
   }
 
-  .similarity__detail-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .similarity__table .ledger__table thead::before {
-    content: '';
-  }
-  .similarity__table thead {
-    display: none;
-  }
-  .similarity__row,
-  .similarity__detail {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 0.2rem 0.6rem;
-    margin-bottom: 0.6rem;
-    padding: 0.75rem 0.85rem;
-    background: var(--sheet);
-    border: 1px solid var(--rule);
-    border-left: 4px solid var(--rule);
-    border-radius: var(--radius);
-  }
-  .similarity__row--bad { border-left-color: var(--bad); }
-  .similarity__row--warn { border-left-color: var(--warn); }
-  .similarity__row--info { border-left-color: var(--info); }
-  .similarity__row--muted { border-left-color: var(--rule); }
-  .similarity__row td,
-  .similarity__detail td {
-    display: block;
-    padding: 0;
-    min-width: 0;
-    background: none;
-  }
-  .similarity__row td.is-number {
-    text-align: left;
-  }
-  .similarity__row .stamp {
-    margin-top: 0.4rem;
-  }
   .masthead__nav {
     margin-left: 0;
   }
@@ -1386,71 +1348,168 @@ th.is-number .sort {
   max-width: 52rem;
   color: var(--ink-soft);
 }
-.similarity__note {
-  margin: 0;
-}
 .similarity__progress {
   display: grid;
   gap: 0.4rem;
 }
-.similarity__progress-text {
+.similarity__progress-text,
+.similarity__more {
   color: var(--ink-soft);
   font-size: 0.9rem;
 }
-.similarity__summary {
+.similarity__dim {
   color: var(--ink-soft);
-  font-size: 0.94rem;
+  font-size: 0.86em;
 }
-.similarity__download {
-  margin: 0.6rem 0 1rem;
-}
-.similarity__errors {
-  padding: 0.6rem 0.85rem;
-  background: var(--warn-bg);
-  color: var(--warn);
-  border-radius: var(--radius);
-}
-.similarity__errors summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-.similarity__errors ul {
-  margin: 0.5rem 0 0;
+
+/* Repos handed in by more than one person: the plainest finding, so it comes first. */
+.similarity__same ul {
+  margin: 0.35rem 0 0;
   padding-left: 1.2rem;
   display: grid;
   gap: 0.2rem;
 }
-.similarity__table-wrap {
-  /* Same look as the register ledger. */
+
+.similarity__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem 1.5rem;
 }
-.similarity__row {
+.similarity__summary {
+  flex: 1 1 18rem;
+}
+.similarity__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.similarity__limit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 1rem;
+  padding: 0.8rem 1rem;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.similarity__limit select {
+  padding-block: 0.2rem;
+}
+
+.similarity__fold {
+  padding: 0.6rem 0.85rem;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.similarity__fold--warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: transparent;
+}
+.similarity__fold--warn .similarity__dim {
+  color: inherit;
+}
+.similarity__fold summary {
   cursor: pointer;
+  font-weight: 600;
+}
+.similarity__fold p {
+  margin-top: 0.5rem;
+  max-width: 52rem;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+}
+.similarity__list {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 18rem;
+  overflow: auto;
+}
+.similarity__list li,
+.similarity__paths-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.1rem 1rem;
+  padding: 0.22rem 0;
+  border-bottom: 1px dashed var(--rule);
+  overflow-wrap: anywhere;
+}
+.similarity__list li:last-child,
+.similarity__paths-list li:last-child {
+  border-bottom: 0;
+}
+
+/* The pairs use the register's ledger. Its headers are plain text here, not sort buttons. */
+.similarity__table th {
+  padding: 0.6rem 0.65rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.similarity__table th.is-number {
+  text-align: right;
+}
+.similarity__row td:first-child {
+  box-shadow: inset 4px 0 0 var(--tone, transparent);
 }
 .similarity__row--open {
   background: var(--sheet-alt);
 }
-.similarity__detail td {
-  background: var(--sheet-alt);
-  padding: 0.75rem 0.85rem;
+.similarity__side {
+  min-width: 11rem;
 }
-.similarity__detail-grid {
+.similarity__side strong {
+  display: block;
+}
+.similarity__repo {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+.similarity__side .tag {
+  margin-left: 0.4rem;
+}
+.similarity__match {
+  min-width: 12rem;
+}
+.similarity__toggle {
+  white-space: nowrap;
+  text-align: right;
+}
+.similarity__detail td {
+  padding: 0.75rem 0.85rem;
+  background: var(--sheet-alt);
+  border-bottom: 1px solid var(--rule);
+}
+.similarity__files {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  align-items: start;
   gap: 0.75rem;
 }
 .similarity__paths {
-  margin: 0;
+  min-width: 0;
   padding: 0.6rem 0.8rem;
   background: var(--sheet);
   border: 1px solid var(--rule);
   border-left: 4px solid var(--rule);
   border-radius: var(--radius);
 }
-.similarity__paths--good {
-  border-left-color: var(--good);
+.similarity__paths--bad {
+  border-left-color: var(--bad);
 }
-.similarity__paths--info {
-  border-left-color: var(--info);
+.similarity__paths--warn {
+  border-left-color: var(--warn);
 }
 .similarity__paths-title {
   margin: 0 0 0.4rem;
@@ -1465,33 +1524,60 @@ th.is-number .sort {
   margin: 0;
   padding: 0;
   list-style: none;
-  display: grid;
-  gap: 0.15rem;
-  max-height: 14rem;
+  max-height: 16rem;
   overflow: auto;
-  font-size: 0.82rem;
+  font-size: 0.86rem;
 }
-.similarity__paths-more {
-  color: var(--ink-soft);
-  font-style: italic;
-}
-.similarity__paths-empty {
+.similarity__rest {
   margin: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.25rem 0.9rem;
+  font-size: 0.86rem;
+}
+.similarity__rest dt {
   color: var(--ink-soft);
-  font-style: italic;
+}
+.similarity__rest dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
-.tone {
-  display: inline-block;
-  width: 0.6rem;
-  height: 0.6rem;
-  margin-right: 0.4rem;
-  border-radius: 999px;
-  vertical-align: 0.05em;
-  background: currentColor;
+/* Under this width each pair becomes a card, like the register's rows. */
+@media (max-width: 52rem) {
+  .similarity__table thead {
+    display: none;
+  }
+  .similarity__row td:first-child {
+    box-shadow: none;
+  }
+  .similarity__side,
+  .similarity__match {
+    min-width: 0;
+  }
+  .similarity__side {
+    margin-bottom: 0.25rem;
+  }
+  .similarity__match::before,
+  .similarity__toggle::before {
+    display: none;
+  }
+  .similarity__toggle {
+    margin-top: 0.3rem;
+  }
+  .similarity__detail,
+  .similarity__detail td {
+    display: block;
+  }
+  .similarity__detail td {
+    margin-bottom: 0.6rem;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+  }
+  .similarity__rest {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .similarity__rest dd {
+    margin-bottom: 0.3rem;
+  }
 }
-.tone--bad { color: var(--bad); }
-.tone--warn { color: var(--warn); }
-.tone--info { color: var(--info); }
-.tone--muted { color: var(--muted); }
-.tone--good { color: var(--good); }

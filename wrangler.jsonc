@@ -19,7 +19,9 @@
   "ratelimits": [
     { "name": "RL_GRAPHQL", "namespace_id": "7301", "simple": { "limit": 40, "period": 60 } },
     { "name": "RL_REST", "namespace_id": "7302", "simple": { "limit": 240, "period": 60 } },
-    { "name": "RL_TREE", "namespace_id": "7303", "simple": { "limit": 40, "period": 60 } }
+    // File lists for the similarity tab: one per repo, so a class of 120 goes through
+    // in one minute. Above that the page waits for the limit and carries on by itself.
+    { "name": "RL_TREE", "namespace_id": "7303", "simple": { "limit": 120, "period": 60 } }
   ],
   // Deploy fails if the token secret is missing.
   "secrets": { "required": ["GITHUB_TOKEN"] },

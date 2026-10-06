@@ -1,14 +1,9 @@
-// Human-friendly display helpers for the similarity report. Pure, no DOM.
-// Tone strings match the existing stamp tones so the chip and table rows
-// reuse the same colour tokens as the register.
+// Display helpers for the similarity report. Pure, no DOM. Tones are the same
+// words the register's stamps use, so both screens share their colours.
 
 import type { Tier } from './types.ts'
 
-/**
- * Formats a Jaccard score in [0, 1] as "NN%" (whole percent) for clarity,
- * except very small values show one decimal place so the table isn't full
- * of zeroes.
- */
+/** A share in [0, 1] as "87%". Small values keep one decimal so they do not all read "0%". */
 export function percent(score: number): string {
   const pct = score * 100
   if (pct === 0) return '0%'
@@ -16,38 +11,39 @@ export function percent(score: number): string {
   return `${pct.toFixed(1)}%`
 }
 
-/** Short, honest label for a tier. Says nothing about plagiarism. */
+/** What the files say, never what the students did. */
 export function tierLabel(tier: Tier): string {
   switch (tier) {
-    case 'very_similar':
-      return 'Very similar'
-    case 'similar':
-      return 'Similar'
-    case 'some_overlap':
-      return 'Some overlap'
-    case 'different':
-      return 'Different'
+    case 'almost_all':
+      return 'Almost all identical'
+    case 'most':
+      return 'Mostly identical'
+    case 'part':
+      return 'Partly identical'
+    case 'little':
+      return 'Small part identical'
+    case 'thin':
+      return 'Only a small file or two'
   }
 }
 
-/**
- * Maps a similarity tier to the same tone vocabulary the register uses,
- * so the chip and the table row border share colours.
- *
- * - very_similar → bad (it is the most worrying tier)
- * - similar      → warn
- * - some_overlap → info
- * - different    → muted
- */
 export function tierTone(tier: Tier): 'bad' | 'warn' | 'info' | 'muted' {
   switch (tier) {
-    case 'very_similar':
+    case 'almost_all':
       return 'bad'
-    case 'similar':
+    case 'most':
       return 'warn'
-    case 'some_overlap':
+    case 'part':
       return 'info'
-    case 'different':
+    case 'little':
+    case 'thin':
       return 'muted'
   }
+}
+
+/** "850 B", "1.2 KB", "3.4 MB" */
+export function fileSize(bytes: number): string {
+  if (bytes < 1000) return `${bytes} B`
+  if (bytes < 1_000_000) return `${(bytes / 1000).toFixed(bytes < 10_000 ? 1 : 0)} KB`
+  return `${(bytes / 1_000_000).toFixed(1)} MB`
 }

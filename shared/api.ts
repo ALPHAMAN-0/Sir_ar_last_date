@@ -103,11 +103,22 @@ export type ActivityParams = {
 }
 export type CommitsParams = { repo: string; ref: string; after?: string }
 export type CommitParams = { repo: string; sha: string; page?: number }
-export type TreeParams = { repo: string; sha: string }
+export type TreeParams = {
+  repo: string
+  /** A commit id, or the id of one folder inside it. */
+  sha: string
+  /** List one folder level only, with its sub-folders. Default is every file below. */
+  flat?: boolean
+}
+/** One file. `sha` is git's hash of the content: equal content, equal hash, in any repo. */
+export type TreeFile = { path: string; sha: string; size: number }
+export type TreeDir = { path: string; sha: string }
 export type TreeResponse = {
-  fetchedAt: string
-  paths: string[]
-  truncated: boolean
+  files: TreeFile[]
+  /** Sub-folders. Filled only for a flat request. */
+  dirs: TreeDir[]
+  /** Too many files for one answer. Ask again folder by folder, with `flat`. */
+  tooLarge: boolean
 }
 
 const enc = encodeURIComponent
@@ -153,7 +164,7 @@ export function commitQuery(p: CommitParams): string {
 }
 
 export function treeQuery(p: TreeParams): string {
-  return join([`repo=${enc(p.repo)}`, `sha=${enc(p.sha)}`])
+  return join([`repo=${enc(p.repo)}`, `sha=${enc(p.sha)}`, p.flat ? 'flat=1' : null])
 }
 
 export const reposUrl = (keys: readonly string[]) => `${API_BASE}/repos?${reposQuery(keys)}`
@@ -240,10 +251,13 @@ export function parseCommitQuery(search: string): CommitParams | null {
 
 export function parseTreeQuery(search: string): TreeParams | null {
   const params = new URLSearchParams(search)
-  if (!only(params, ['repo', 'sha'])) return null
+  if (!only(params, ['repo', 'sha', 'flat'])) return null
   const repo = single(params, 'repo')
   const sha = single(params, 'sha')
+  const flat = single(params, 'flat')
   if (!repo || !isRepoKey(repo) || !sha || !isSha(sha)) return null
+  if (flat === null || (flat !== undefined && flat !== '1')) return null
   const parsed: TreeParams = { repo, sha }
+  if (flat === '1') parsed.flat = true
   return `?${treeQuery(parsed)}` === search ? parsed : null
 }

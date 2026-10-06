@@ -1,232 +1,179 @@
-// The similarity tab. Reads repos from the store, fetches their file
-// trees from public api.github.com (no token, anonymous), runs the
-// comparison in a Web Worker, then shows the result sorted by Jaccard
-// similarity. Click a row to see the shared / unique paths.
+// The similarity tab. Loads the file list of every repo through the Worker,
+// compares them in a Web Worker, and shows which pairs hold identical files.
+// The rules and the arithmetic live in src/similarity; this file only draws.
 
-import { Fragment, useEffect, useState } from 'react'
-import type { RepoOk } from '../../shared/api.ts'
+import { Fragment, useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { repoUrl } from '../logic/people.ts'
 import { zoneLabel } from '../logic/time.ts'
-import { tier } from '../similarity/compare.ts'
-import { percent, tierLabel, tierTone } from '../similarity/format.ts'
-import { downloadReport, type ReportPair } from '../similarity/report.ts'
-import { comparableRepos, treeInputs } from '../similarity/run.ts'
-import { fetchAll, type TreeError } from '../similarity/trees.ts'
-import type { FileTree, Pair } from '../similarity/types.ts'
-import { useApp, useNow, usePeople } from '../state/hooks.ts'
+import { analyse, defaultCommonLimit, pairDetail, sharedSets, type Shared } from '../similarity/compare.ts'
+import type { CompareRequest } from '../similarity/compare.worker.ts'
+import { fileSize, percent, tierLabel, tierTone } from '../similarity/format.ts'
+import { describeSkips } from '../similarity/rules.ts'
+import { groupLabel, personLabel, planComparison, type RepoGroup } from '../similarity/run.ts'
+import { summarise, type NotCompared, type PairRow } from '../similarity/summary.ts'
+import { createTreeLoader, type Loaded, type TreeInput } from '../similarity/trees.ts'
+import type { Analysis, RepoFiles } from '../similarity/types.ts'
+import { useApp, usePeople } from '../state/hooks.ts'
+import { client } from '../state/store.ts'
+import { PauseNotice } from './PauseNotice.tsx'
 
-type ProgressEvent = { done: number; total: number; current: string }
+// File lists are addressed by commit id, so one loader keeps them for the whole session.
+const loader = createTreeLoader(client.get)
 
-type FetchResult = {
-  trees: Map<string, FileTree>
-  errors: Map<string, TreeError>
-}
+/** Rows drawn before "Show all". A class of 200 can produce thousands of weak pairs. */
+const VISIBLE_PAIRS = 100
+const VISIBLE_FILES = 100
+const LIMIT_CHOICES = [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 50, 100]
 
-const NONE: never[] = []
+type Lists =
+  | { phase: 'waiting' }
+  | { phase: 'loading'; done: number; total: number }
+  | { phase: 'ready'; loaded: Loaded }
 
-/**
- * Wraps the comparison in a Web Worker. Vite bundles compare.worker.ts
- * into a separate worker chunk when used with `new Worker(new URL(...))`.
- */
-function runInWorker(trees: Map<string, FileTree>): Promise<Pair[]> {
-  return new Promise((resolve, reject) => {
-    let worker: Worker
-    try {
-      worker = new Worker(new URL('../similarity/compare.worker.ts', import.meta.url), { type: 'module' })
-    } catch (error) {
-      reject(error)
-      return
-    }
-    worker.addEventListener('message', (event: MessageEvent<{ pairs: Pair[] }>) => {
-      resolve(event.data.pairs)
-      worker.terminate()
-    })
-    worker.addEventListener('error', (event) => {
-      reject(new Error(event.message || 'Worker error'))
-      worker.terminate()
-    })
-    worker.postMessage({ trees: [...trees.entries()] })
-  })
-}
-
-/** Builds a friendly label for a repo, preferring the sheet's id/name. */
-function repoLabel(repoKey: string, labelByKey: Map<string, string>): string {
-  const fromSheet = labelByKey.get(repoKey)
-  return fromSheet ?? repoKey
-}
-
-/**
- * Loads the trees and runs the comparison. Returns a discriminated
- * state value so the view can render each phase without a separate
- * "is loading" flag. Drops late answers when the comparable set
- * changes mid-flight.
- */
-type RunOutcome =
-  | { phase: 'idle' }
-  | { phase: 'fetching'; progress: ProgressEvent }
-  | { phase: 'comparing'; fetch: FetchResult }
-  | { phase: 'ready'; fetch: FetchResult; pairs: Pair[] }
-  | { phase: 'error'; message: string }
-
-function useSimilarityRun(comparable: readonly RepoOk[]): RunOutcome {
-  const [outcome, setOutcome] = useState<RunOutcome>({ phase: 'idle' })
-  // Stable key so a re-order of the same repos does not refetch.
-  const comparableKey = comparable
-    .map((repo) => `${repo.key}@${repo.headOid ?? ''}@${repo.defaultBranch ?? ''}`)
-    .join('|')
+/** Loads the file list of every repo. An answer for an older sheet or commit is ignored. */
+function useFileLists(inputs: readonly TreeInput[], enabled: boolean) {
+  const key = inputs.map((input) => `${input.repo}@${input.headOid}`).join('|')
+  const [attempt, setAttempt] = useState(0)
+  const [result, setResult] = useState<{ id: string; lists: Lists } | null>(null)
+  const id = `${key}#${attempt}`
 
   useEffect(() => {
-    if (comparable.length < 2) {
-      setOutcome({ phase: 'idle' })
-      return
-    }
-    let cancelled = false
-    setOutcome({ phase: 'fetching', progress: { done: 0, total: comparable.length, current: '' } })
-
-    void (async () => {
-      try {
-        const fetchResult = await fetchAll(treeInputs(comparable), {
-          concurrency: 4,
-          onProgress: (done, total, current) => {
-            if (cancelled) return
-            setOutcome({ phase: 'fetching', progress: { done, total, current } })
-          },
-        })
-        if (cancelled) return
-        if (fetchResult.trees.size < 2) {
-          setOutcome({ phase: 'ready', fetch: fetchResult, pairs: [] })
-          return
-        }
-        setOutcome({ phase: 'comparing', fetch: fetchResult })
-        const resultPairs = await runInWorker(fetchResult.trees)
-        if (cancelled) return
-        setOutcome({ phase: 'ready', fetch: fetchResult, pairs: resultPairs })
-      } catch (error) {
-        if (cancelled) return
-        setOutcome({
-          phase: 'error',
-          message: error instanceof Error ? error.message : 'Could not run the comparison.',
-        })
-      }
-    })()
-
+    if (!enabled || inputs.length === 0) return
+    let live = true
+    void loader
+      .loadAll(inputs, (done, total) => {
+        if (live) setResult({ id, lists: { phase: 'loading', done, total } })
+      })
+      .then((loaded) => {
+        if (live) setResult({ id, lists: { phase: 'ready', loaded } })
+      })
     return () => {
-      cancelled = true
+      live = false
     }
-    // comparableKey changes only when the set of (repo, head, branch)
-    // tuples changes.
+    // `inputs` is a new array whenever the register re-judges its rows; `id`
+    // changes only when a repo or its head commit does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comparableKey])
+  }, [id, enabled])
 
-  return outcome
+  const lists: Lists =
+    !enabled || inputs.length === 0
+      ? { phase: 'waiting' }
+      : result && result.id === id
+        ? result.lists
+        : { phase: 'loading', done: 0, total: inputs.length }
+  return { lists, retry: () => setAttempt((count) => count + 1) }
 }
+
+/**
+ * Runs the comparison in a Web Worker. Null until the first answer for these
+ * file lists; after that the previous answer stays on screen while a new limit
+ * is worked out, so the page does not blink and the limit box keeps its focus.
+ */
+function useAnalysis(trees: ReadonlyMap<string, RepoFiles> | null, commonLimit: number): Analysis | null {
+  const [result, setResult] = useState<{ trees: unknown; analysis: Analysis } | null>(null)
+
+  useEffect(() => {
+    if (!trees) return
+    const repos = [...trees.values()]
+    let live = true
+    const finish = (analysis: Analysis) => {
+      if (live) setResult({ trees, analysis })
+    }
+    // A browser that cannot start the worker still gets its answer, on this thread.
+    const here = () => queueMicrotask(() => finish(analyse(repos, { commonLimit })))
+    let worker: Worker | null = null
+    try {
+      worker = new Worker(new URL('../similarity/compare.worker.ts', import.meta.url), { type: 'module' })
+      worker.addEventListener('message', (event: MessageEvent<Analysis>) => finish(event.data))
+      worker.addEventListener('error', here)
+      const request: CompareRequest = { repos, commonLimit }
+      worker.postMessage(request)
+    } catch {
+      here()
+    }
+    return () => {
+      live = false
+      worker?.terminate()
+    }
+  }, [trees, commonLimit])
+
+  return result && result.trees === trees ? result.analysis : null
+}
+
+const plural = (count: number, one: string, many = `${one}s`) =>
+  `${count.toLocaleString('en')} ${count === 1 ? one : many}`
 
 export function SimilarityView() {
   const sheet = useApp((state) => state.sheet)
   const people = usePeople()
-  const now = useNow()
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const plan = useMemo(() => planComparison(people), [people])
+  const { lists, retry } = useFileLists(plan.inputs, plan.waiting === 0)
+  const loaded = lists.phase === 'ready' ? lists.loaded : null
 
-  // One map per repo key. The label is "id · name" when both exist,
-  // falling back to the key. The .xlsx export uses the structured parts.
-  const metaByKey = (() => {
-    const map = new Map<string, { id: string; name: string; branch: string; headOid: string; label: string }>()
-    for (const person of people) {
-      const link = person.row.link
-      if (!link.ok) continue
-      if (map.has(link.key)) continue
-      const meta = person.meta
-      const parts: string[] = []
-      if (person.row.id) parts.push(person.row.id)
-      if (person.row.name) parts.push(person.row.name)
-      map.set(link.key, {
-        id: person.row.id,
-        name: person.row.name,
-        branch: meta?.state === 'ok' ? (meta.defaultBranch ?? '') : '',
-        headOid: meta?.state === 'ok' ? (meta.headOid ?? '') : '',
-        label: parts.length > 0 ? parts.join(' · ') : link.key,
-      })
-    }
-    return map
-  })()
-  const labelByKey = new Map<string, string>()
-  for (const [key, meta] of metaByKey) labelByKey.set(key, meta.label)
+  const repoCount = loaded?.trees.size ?? 0
+  // With three repos nothing can be in "more than 4": show the limit that is really in force.
+  const never = Math.max(repoCount, 2)
+  const suggested = Math.min(defaultCommonLimit(repoCount), never)
+  const [chosenLimit, setChosenLimit] = useState<number | null>(null)
+  const limit = Math.min(chosenLimit ?? suggested, never)
 
-  const okRepos = people.flatMap((person) => {
-    const key = person.row.link.ok ? person.row.link.key : null
-    if (!key) return NONE
-    const meta = person.meta
-    if (!meta || meta.state !== 'ok') return NONE
-    return [meta]
-  })
-  const comparable = comparableRepos(okRepos)
-  const outcome = useSimilarityRun(comparable)
+  const analysis = useAnalysis(loaded?.trees ?? null, limit)
+  const summary = useMemo(
+    () => (loaded && analysis ? summarise(plan, loaded, analysis) : null),
+    [plan, loaded, analysis],
+  )
+  const shared = useMemo(() => (analysis ? sharedSets(analysis) : null), [analysis])
 
-  // Derive these from outcome so we don't keep separate useState calls.
-  const phase = outcome.phase
-  const progress = outcome.phase === 'fetching' ? outcome.progress : null
-  const result = outcome.phase === 'ready' || outcome.phase === 'comparing' ? outcome.fetch : null
-  const pairs = outcome.phase === 'ready' ? outcome.pairs : []
-  const errorMessage = outcome.phase === 'error' ? outcome.message : null
-
-  const sortedPairs = (() => {
-    const copy = [...pairs]
-    copy.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score
-      if (b.overlap !== a.overlap) return b.overlap - a.overlap
-      return a.aKey.localeCompare(b.aKey)
-    })
-    return copy
-  })()
-
-  const treeCount = result?.trees.size ?? 0
-  const errorCount = result?.errors.size ?? 0
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
+  const [showAll, setShowAll] = useState(false)
+  const [downloadFailed, setDownloadFailed] = useState(false)
 
   if (!sheet) return null
 
   const toggle = (key: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
+    setOpen((previous) => {
+      const next = new Set(previous)
       if (next.has(key)) next.delete(key)
       else next.add(key)
       return next
     })
   }
 
-  const totalPossiblePairs = (comparable.length * (comparable.length - 1)) / 2
-
-  const onDownload = () => {
-    if (phase !== 'ready' || !result) return
-    const rows: ReportPair[] = sortedPairs.map((pair) => {
-      const aMeta = metaByKey.get(pair.aKey)
-      const bMeta = metaByKey.get(pair.bKey)
-      return {
-        aKey: pair.aKey,
-        aId: aMeta?.id ?? '',
-        aName: aMeta?.name ?? '',
-        aBranch: pair.aBranch,
-        aHeadOid: pair.aHeadOid,
-        bKey: pair.bKey,
-        bId: bMeta?.id ?? '',
-        bName: bMeta?.name ?? '',
-        bBranch: pair.bBranch,
-        bHeadOid: pair.bHeadOid,
-        overlap: pair.overlap,
-        union: pair.union,
-        score: pair.score,
-        shared: pair.shared,
-        onlyA: pair.onlyA,
-        onlyB: pair.onlyB,
-      }
-    })
-    downloadReport(rows, {
-      sheetName: sheet.sheetName,
-      checkedAt: now,
-      totalTrees: comparable.length,
-      failedTrees: errorCount,
-      totalPairs: totalPossiblePairs,
-      zone: zoneLabel(),
-    })
+  const download = async () => {
+    if (!summary || !analysis || !loaded) return
+    setDownloadFailed(false)
+    try {
+      // The Excel library is fetched on first use.
+      const report = await import('../similarity/report.ts')
+      report.downloadReport({
+        summary,
+        analysis,
+        trees: loaded.trees,
+        info: {
+          fileName: sheet.fileName,
+          sheetName: sheet.sheetName,
+          checkedAt: Date.now(),
+          zone: zoneLabel(),
+        },
+      })
+    } catch (error) {
+      console.error('The similarity report could not be written:', error)
+      setDownloadFailed(true)
+    }
   }
+
+  // Before the comparison has run, the plan alone already knows these two.
+  const sameRepo = summary?.sameRepo ?? plan.groups.filter((group) => group.people.length > 1)
+  const notCompared: NotCompared[] =
+    summary?.notCompared ??
+    plan.leftOut.map((entry) => ({ label: personLabel(entry.person), repo: null, reason: entry.reason }))
+  const nothing = plan.waiting === 0 && plan.inputs.length === 0
+  const failed = loaded ? loaded.errors.size : 0
+  const pairs = summary?.pairs ?? []
+  const shown = showAll ? pairs : pairs.slice(0, VISIBLE_PAIRS)
+  const limits = [...new Set([...LIMIT_CHOICES.filter((value) => value < never), suggested, never])].sort(
+    (a, b) => a - b,
+  )
 
   return (
     <section className="similarity">
@@ -240,123 +187,202 @@ export function SimilarityView() {
       <header className="similarity__head">
         <h1 className="similarity__title">Similarity report</h1>
         <p className="similarity__lede">
-          How similar each pair of repos looks by file names. Not a verdict on copying: two
-          students independently writing <span className="mono">index.html</span> and{' '}
-          <span className="mono">style.css</span> will score high. Use this as a starting point
-          for a closer look.
+          Shows which repos hold files with exactly the same content, whatever the files are
+          called. Downloaded packages, pictures, tool settings and files that most of the class
+          has are left out first. A copy that was edited in every file is not found, so read this
+          as a list of places to look, not as a verdict.
         </p>
       </header>
 
-      <p className="notice notice--warn similarity__note" role="note">
-        File-name overlap only. Anonymous GitHub requests (60 per hour, 5,000 if you sign in).
-      </p>
+      <PauseNotice />
 
-      {comparable.length < 2 ? (
-        <p className="empty">
-          Need at least two checked repos to compare. The register shows progress for each one.
+      {sameRepo.length > 0 ? (
+        <div className="notice notice--bad similarity__same" role="note">
+          <p>
+            <strong>{plural(sameRepo.length, 'repo was', 'repos were')} handed in by more than one person.</strong>
+          </p>
+          <ul>
+            {sameRepo.map((group) => (
+              <li key={group.repo}>
+                <a className="mono" href={repoUrl(group.repo)} target="_blank" rel="noopener noreferrer">
+                  {group.nameWithOwner}
+                </a>
+                : {group.people.map(personLabel).join(', ')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {plan.waiting > 0 ? (
+        <p className="empty" role="status">
+          Waiting for the register to finish checking {plural(plan.waiting, 'row')}.
         </p>
       ) : null}
 
-      {phase === 'fetching' || phase === 'comparing' ? (
+      {nothing ? (
+        <p className="empty">There is nothing to compare: no row of this sheet leads to a repo with files.</p>
+      ) : null}
+
+      {lists.phase === 'loading' || (loaded && !analysis) ? (
         <div className="similarity__progress" role="status" aria-live="polite">
           <progress
             className="progress"
-            max={comparable.length}
-            value={progress?.done ?? 0}
+            max={plan.inputs.length}
+            value={lists.phase === 'loading' ? lists.done : plan.inputs.length}
           />
           <p className="similarity__progress-text">
-            {phase === 'fetching'
-              ? `Fetching file trees ${progress?.done ?? 0} of ${progress?.total ?? comparable.length}${
-                  progress?.current ? ` · ${progress.current}` : ''
-                }`
-              : `Comparing ${treeCount} trees…`}
+            {lists.phase === 'loading'
+              ? `Reading file lists: ${lists.done} of ${lists.total} repos`
+              : `Comparing ${plural(repoCount, 'repo')}`}
           </p>
         </div>
       ) : null}
 
-      {phase === 'error' && errorMessage ? (
-        <p className="notice notice--bad" role="alert">
-          {errorMessage}
-        </p>
-      ) : null}
-
-      {phase === 'ready' && result ? (
+      {summary && analysis && loaded ? (
         <>
-          <p className="similarity__summary">
-            {treeCount} of {comparable.length} trees fetched
-            {errorCount > 0 ? `, ${errorCount} could not be listed` : ''}.{' '}
-            {sortedPairs.length} {sortedPairs.length === 1 ? 'pair' : 'pairs'} compared.
-          </p>
-
-          {sortedPairs.length > 0 ? (
-            <p className="similarity__download">
-              <button type="button" className="button button--primary" onClick={onDownload}>
+          <div className="similarity__bar">
+            <p className="similarity__summary">
+              <strong>{plural(summary.compared, 'repo')}</strong> compared, which makes{' '}
+              {plural(analysis.totalPairs, 'pair')}. <strong>{plural(pairs.length, 'pair')}</strong>{' '}
+              {pairs.length === 1 ? 'shares' : 'share'} at least one identical file.
+            </p>
+            <div className="similarity__actions">
+              {failed > 0 ? (
+                <button type="button" className="button" onClick={retry}>
+                  Try again
+                </button>
+              ) : null}
+              <button type="button" className="button button--primary" onClick={() => void download()}>
                 Download .xlsx
               </button>
+            </div>
+          </div>
+          {downloadFailed ? (
+            <p className="notice notice--bad" role="alert">
+              The report could not be written. Please try again.
             </p>
           ) : null}
 
-          {errorCount > 0 ? (
-            <details className="similarity__errors">
-              <summary>Repos whose file tree could not be listed ({errorCount})</summary>
-              <ul>
-                {[...result.errors.entries()].map(([repoKey, err]) => (
-                  <li key={repoKey}>
-                    <span className="mono">{repoKey}</span>: {describeError(err)}
+          {summary.onlyStarter > 0 ? (
+            <p className="notice notice--warn" role="note">
+              <strong>
+                {plural(summary.onlyStarter, 'repo holds', 'repos hold')} nothing but files that more than{' '}
+                {analysis.commonLimit} repos have.
+              </strong>{' '}
+              That is expected when a repo contains only what was handed out. If the files listed
+              under &ldquo;Starter files&rdquo; below are the students&rsquo; own work, many people
+              handed in the same solution: raise the limit to compare them.
+            </p>
+          ) : null}
+
+          <form className="similarity__limit" onSubmit={(event) => event.preventDefault()}>
+            <label className="deadline__label" htmlFor="starter-limit">
+              Starter files
+            </label>
+            <span>
+              A file found in more than{' '}
+              <select
+                id="starter-limit"
+                value={limit}
+                onChange={(event) => setChosenLimit(Number(event.target.value))}
+              >
+                {limits.map((value) => (
+                  <option key={value} value={value}>
+                    {value === never
+                      ? `${value}: count every file`
+                      : value === suggested
+                        ? `${value} (suggested)`
+                        : value}
+                  </option>
+                ))}
+              </select>{' '}
+              repos was probably handed out, so it is not counted.{' '}
+              {analysis.starter.length > 0
+                ? `${plural(analysis.starter.length, 'file is', 'files are')} left out this way.`
+                : 'No file is left out this way.'}
+            </span>
+          </form>
+
+          {analysis.starter.length > 0 ? (
+            <details className="similarity__fold">
+              <summary>Starter files that are not counted ({analysis.starter.length.toLocaleString('en')})</summary>
+              <p>
+                If you see a student&rsquo;s own work in this list, many repos hold the same solution:
+                raise the limit above to count it.
+              </p>
+              <ul className="similarity__list">
+                {analysis.starter.slice(0, VISIBLE_FILES).map((file) => (
+                  <li key={file.sha}>
+                    <span className="mono">{file.path}</span>
+                    <span className="similarity__dim">
+                      in {plural(file.repos, 'repo')} · {fileSize(file.size)}
+                    </span>
                   </li>
                 ))}
+                {analysis.starter.length > VISIBLE_FILES ? (
+                  <li className="similarity__dim">
+                    +{(analysis.starter.length - VISIBLE_FILES).toLocaleString('en')} more, all in the .xlsx
+                  </li>
+                ) : null}
               </ul>
             </details>
           ) : null}
+        </>
+      ) : null}
 
-          {sortedPairs.length > 0 ? (
+      {notCompared.length > 0 ? (
+        <details className="similarity__fold similarity__fold--warn">
+          <summary>Not compared ({notCompared.length})</summary>
+          <ul className="similarity__list">
+            {notCompared.map((entry) => (
+              <li key={`${entry.label}|${entry.repo ?? ''}|${entry.reason}`}>
+                <span>
+                  {entry.label}
+                  {entry.repo ? <span className="mono"> {entry.repo}</span> : null}
+                </span>
+                <span className="similarity__dim">{entry.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
+      {summary && loaded && shared ? (
+        pairs.length > 0 ? (
+          <>
             <div className="ledger similarity__table-wrap">
               <table className="ledger__table similarity__table">
                 <thead>
                   <tr>
-                    <th>A</th>
-                    <th>B</th>
-                    <th className="is-number">Overlap</th>
-                    <th className="is-number">Shared</th>
-                    <th className="is-number">Only A</th>
-                    <th className="is-number">Only B</th>
+                    <th scope="col">A</th>
+                    <th scope="col">B</th>
+                    <th scope="col">Match</th>
+                    <th scope="col" className="is-number">
+                      Identical
+                    </th>
+                    <th scope="col" className="is-number">
+                      Of A
+                    </th>
+                    <th scope="col" className="is-number">
+                      Of B
+                    </th>
+                    <th scope="col">
+                      <span className="visually-hidden">Files</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedPairs.map((pair) => {
-                    const aLabel = repoLabel(pair.aKey, labelByKey)
-                    const bLabel = repoLabel(pair.bKey, labelByKey)
-                    const key = `${pair.aKey}|${pair.bKey}`
-                    const isOpen = expanded.has(key)
-                    const t = tier(pair.score)
-                    const tone = tierTone(t)
+                  {shown.map((pair) => {
+                    const key = `${pair.summary.aKey}|${pair.summary.bKey}`
+                    const isOpen = open.has(key)
                     return (
                       <Fragment key={key}>
-                        <tr
-                          className={`entry similarity__row similarity__row--${tone}${
-                            isOpen ? ' similarity__row--open' : ''
-                          }`}
-                          onClick={() => toggle(key)}
-                        >
-                          <td className="entry__name">
-                            <span className={`tone tone--${tone}`} aria-hidden="true" />
-                            {aLabel}
-                          </td>
-                          <td className="entry__name">{bLabel}</td>
-                          <td className="is-number mono">
-                            <span className={`stamp stamp--${tone}`}>
-                              <span className="stamp__label">{percent(pair.score)}</span>
-                              <span className="stamp__detail"> {tierLabel(t)}</span>
-                            </span>
-                          </td>
-                          <td className="is-number mono">{pair.overlap}</td>
-                          <td className="is-number mono">{pair.onlyA.length}</td>
-                          <td className="is-number mono">{pair.onlyB.length}</td>
-                        </tr>
+                        <PairLine pair={pair} isOpen={isOpen} onToggle={() => toggle(key)} />
                         {isOpen ? (
                           <tr className="similarity__detail">
-                            <td colSpan={6}>
-                              <PairDetail pair={pair} aLabel={aLabel} bLabel={bLabel} />
+                            <td colSpan={7}>
+                              <PairFiles pair={pair} trees={loaded.trees} shared={shared} />
                             </td>
                           </tr>
                         ) : null}
@@ -366,63 +392,154 @@ export function SimilarityView() {
                 </tbody>
               </table>
             </div>
-          ) : (
-            <p className="empty">
-              Nothing to compare. Most repos in this sheet could not be listed by GitHub.
-            </p>
-          )}
-        </>
+            {pairs.length > shown.length ? (
+              <p className="similarity__more">
+                Showing the {shown.length} strongest of {pairs.length.toLocaleString('en')} pairs.{' '}
+                <button type="button" className="linkish" onClick={() => setShowAll(true)}>
+                  Show all
+                </button>
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <p className="empty">No two different repos in this sheet hold a file with the same content.</p>
+        )
       ) : null}
     </section>
   )
 }
 
-/** Renders the expanded path lists for one pair. */
-function PairDetail({ pair, aLabel, bLabel }: { pair: Pair; aLabel: string; bLabel: string }) {
+function Side({ group }: { group: RepoGroup }) {
   return (
-    <div className="similarity__detail-grid">
-      <PathList tone="good" title={`In both (${pair.shared.length})`} paths={pair.shared} />
-      <PathList tone="info" title={`Only in ${aLabel} (${pair.onlyA.length})`} paths={pair.onlyA} />
-      <PathList tone="info" title={`Only in ${bLabel} (${pair.onlyB.length})`} paths={pair.onlyB} />
-    </div>
+    <>
+      <strong>{groupLabel(group)}</strong>
+      <a className="similarity__repo mono" href={repoUrl(group.repo)} target="_blank" rel="noopener noreferrer">
+        {group.nameWithOwner}
+      </a>
+      {group.isFork ? <span className="tag">Fork</span> : null}
+    </>
   )
 }
 
-function PathList({
-  tone,
-  title,
-  paths,
-}: {
-  tone: 'good' | 'info'
-  title: string
-  paths: string[]
-}) {
+function PairLine({ pair, isOpen, onToggle }: { pair: PairRow; isOpen: boolean; onToggle: () => void }) {
+  const { summary } = pair
+  const tone = tierTone(summary.tier)
+  const onRowClick = (event: MouseEvent<HTMLTableRowElement>) => {
+    // The whole row is a shortcut; the links and the button inside it keep working.
+    if ((event.target as HTMLElement).closest('a, button')) return
+    if (window.getSelection()?.toString()) return
+    onToggle()
+  }
   return (
-    <section className={`similarity__paths similarity__paths--${tone}`}>
-      <h4 className="similarity__paths-title">{title}</h4>
-      {paths.length === 0 ? (
-        <p className="similarity__paths-empty">None.</p>
-      ) : (
+    <tr
+      className={`entry entry--${tone} similarity__row${isOpen ? ' similarity__row--open' : ''}`}
+      onClick={onRowClick}
+    >
+      <td className="similarity__side" data-label="A">
+        <Side group={pair.a} />
+      </td>
+      <td className="similarity__side" data-label="B">
+        <Side group={pair.b} />
+      </td>
+      <td className="similarity__match" data-label="Match">
+        <span className={`stamp stamp--${tone}`}>
+          <span className="stamp__label">{percent(summary.score)}</span>
+          <span className="stamp__detail"> {tierLabel(summary.tier)}</span>
+        </span>
+        {summary.sameCommit ? <span className="entry__notes">Same commit in both repos</span> : null}
+      </td>
+      <td className="is-number mono" data-label="Identical">
+        {plural(summary.identical, 'file')}
+      </td>
+      <td className="is-number mono" data-label="Of A">
+        {summary.aIdentical} of {summary.aOwn}
+      </td>
+      <td className="is-number mono" data-label="Of B">
+        {summary.bIdentical} of {summary.bOwn}
+      </td>
+      <td className="similarity__toggle">
+        <button type="button" className="linkish" aria-expanded={isOpen} onClick={onToggle}>
+          {isOpen ? 'Hide files' : 'Show files'}
+        </button>
+      </td>
+    </tr>
+  )
+}
+
+function leftOutText(tree: RepoFiles): string {
+  const parts = [describeSkips(tree.skipped)]
+  if (tree.unopened > 0) parts.push(`${plural(tree.unopened, 'third-party folder')} never opened`)
+  return parts.filter(Boolean).join(', ') || 'nothing'
+}
+
+function PairFiles({
+  pair,
+  trees,
+  shared,
+}: {
+  pair: PairRow
+  trees: ReadonlyMap<string, RepoFiles>
+  shared: Shared
+}) {
+  const a = trees.get(pair.a.repo)
+  const b = trees.get(pair.b.repo)
+  const detail = useMemo(() => (a && b ? pairDetail(a, b, shared) : null), [a, b, shared])
+  if (!a || !b || !detail) return null
+  const aLabel = groupLabel(pair.a, 1)
+  const bLabel = groupLabel(pair.b, 1)
+
+  return (
+    <div className="similarity__files">
+      <section className="similarity__paths similarity__paths--bad">
+        <h4 className="similarity__paths-title">Identical content ({detail.identical.length})</h4>
         <ul className="similarity__paths-list">
-          {paths.slice(0, 50).map((path) => (
-            <li key={path} className="mono">
-              {path}
+          {detail.identical.slice(0, VISIBLE_FILES).map((file) => (
+            <li key={file.aPath}>
+              <span className="mono">
+                {file.aPath === file.bPath ? file.aPath : `${file.aPath} = ${file.bPath}`}
+              </span>
+              <span className="similarity__dim">{fileSize(file.size)}</span>
             </li>
           ))}
-          {paths.length > 50 ? (
-            <li className="similarity__paths-more">
-              +{paths.length - 50} more (download the .xlsx to see all)
+          {detail.identical.length > VISIBLE_FILES ? (
+            <li className="similarity__dim">
+              +{(detail.identical.length - VISIBLE_FILES).toLocaleString('en')} more, in the .xlsx
             </li>
           ) : null}
         </ul>
-      )}
-    </section>
-  )
-}
+      </section>
 
-function describeError(err: TreeError): string {
-  if (err.kind === 'http' && err.status === 403) {
-    return 'Rate-limited. Sign in to GitHub to raise the limit.'
-  }
-  return err.message
+      {detail.sameName.length > 0 ? (
+        <section className="similarity__paths similarity__paths--warn">
+          <h4 className="similarity__paths-title">Same name, other content ({detail.sameName.length})</h4>
+          <ul className="similarity__paths-list">
+            {detail.sameName.slice(0, VISIBLE_FILES).map((file) => (
+              <li key={file.path}>
+                <span className="mono">{file.path}</span>
+                <span className="similarity__dim">
+                  {fileSize(file.aSize)} / {fileSize(file.bSize)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <section className="similarity__paths">
+        <h4 className="similarity__paths-title">The rest</h4>
+        <dl className="similarity__rest">
+          <dt>Only in A ({aLabel})</dt>
+          <dd>{plural(detail.onlyA, 'file')}</dd>
+          <dt>Only in B ({bLabel})</dt>
+          <dd>{plural(detail.onlyB, 'file')}</dd>
+          <dt>Starter files both have</dt>
+          <dd>{detail.starter === 0 ? 'none' : `${detail.starter}, not counted`}</dd>
+          <dt>Left out of A</dt>
+          <dd>{leftOutText(a)}</dd>
+          <dt>Left out of B</dt>
+          <dd>{leftOutText(b)}</dd>
+        </dl>
+      </section>
+    </div>
+  )
 }

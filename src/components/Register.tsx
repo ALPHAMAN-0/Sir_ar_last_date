@@ -8,19 +8,13 @@ import {
   statusLabel,
   toExportRows,
 } from '../logic/people.ts'
-import { formatDateTime, formatTime, zoneLabel } from '../logic/time.ts'
+import { formatDateTime, zoneLabel } from '../logic/time.ts'
 import { useApp, useNow, usePeople } from '../state/hooks.ts'
 import { clearSheet, loadFile, refresh, setSearch, setStatusFilter } from '../state/store.ts'
 import { ColumnPicker } from './ColumnPicker.tsx'
 import { DeadlineBox } from './DeadlineBox.tsx'
+import { PauseNotice } from './PauseNotice.tsx'
 import { PeopleTable } from './PeopleTable.tsx'
-
-const PAUSE_TEXT = {
-  rate_limited: 'Too many requests at once. Checking continues by itself at',
-  github_throttled: 'GitHub asked the app to slow down. Checking continues by itself at',
-  quota_reserved:
-    'The GitHub limit shared by everyone using this page is used up for this hour. Press Refresh after',
-} as const
 
 export function Register() {
   const sheet = useApp((state) => state.sheet)
@@ -30,7 +24,6 @@ export function Register() {
   const deadline = useApp((state) => state.deadline)
   const loadingRepos = useApp((state) => state.loadingRepos)
   const checkedAt = useApp((state) => state.checkedAt)
-  const pause = useApp((state) => state.pause)
   const quota = useApp((state) => state.quota)
   const canPickColumns = useApp((state) => state.columns !== null)
   const people = usePeople()
@@ -150,11 +143,7 @@ export function Register() {
 
       <DeadlineBox />
 
-      {pause ? (
-        <p className="notice notice--bad" role="status">
-          {PAUSE_TEXT[pause.reason]} {formatTime(pause.until)}.
-        </p>
-      ) : null}
+      <PauseNotice />
 
       <div className="tally" role="group" aria-label="Filter by status">
         <button

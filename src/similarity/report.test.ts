@@ -1,17 +1,22 @@
-// Phase 5 — .xlsx download of the similarity report.
-// Mirrors src/sheet/exportXlsx.test.ts in style: a real round-trip through
-// SheetJS, formula-injection attempts must end up as text, dates as Excel
-// serial numbers.
+// The similarity .xlsx. Like src/sheet/exportXlsx.test.ts, every check is a
+// real round trip: the workbook is written to bytes and read back as Excel would.
 
 import { afterEach, describe, expect, it } from 'vitest'
 import * as XLSX from 'xlsx'
+import type { TreeFile } from '../../shared/api.ts'
+import { analyse } from './compare.ts'
 import {
   buildReportWorkbook,
   downloadReport,
+  MAX_FILES_PER_PAIR,
   reportFileName,
-  type ReportInfo,
-  type ReportPair,
+  type ReportInput,
 } from './report.ts'
+import { noSkips } from './rules.ts'
+import type { Plan, RepoGroup } from './run.ts'
+import { summarise } from './summary.ts'
+import type { Loaded, TreeError } from './trees.ts'
+import type { RepoFiles } from './types.ts'
 
 declare const process: { env: Record<string, string | undefined> }
 const originalZone = process.env.TZ
@@ -20,148 +25,265 @@ afterEach(() => {
   else process.env.TZ = originalZone
 })
 
-const pair = (over: Partial<ReportPair> = {}): ReportPair => ({
-  aKey: 'rahim/task-1',
-  aId: '20-41234-1',
-  aName: 'Rahim Uddin',
-  aBranch: 'main',
-  aHeadOid: 'a'.repeat(40),
-  bKey: 'karim/task-1',
-  bId: '20-41235-1',
-  bName: 'Karim Hasan',
-  bBranch: 'main',
-  bHeadOid: 'b'.repeat(40),
-  overlap: 5,
-  union: 12,
-  score: 5 / 12,
-  shared: ['README.md', 'index.html', 'style.css', 'src/main.js', 'src/util.js'],
-  onlyA: ['secret.md'],
-  onlyB: ['images/logo.png'],
-  ...over,
+const sha = (content: string) =>
+  [...content].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 7).toString(16).padStart(8, '0').repeat(5)
+
+function tree(repo: string, files: Record<string, string>): RepoFiles {
+  const list: TreeFile[] = Object.entries(files).map(([path, content]) => ({ path, sha: sha(content), size: 2000 }))
+  return { repo, branch: 'main', headOid: sha(repo), files: list, skipped: { ...noSkips(), thirdParty: 40 }, unopened: 0 }
+}
+
+const who = (rowNumber: number, id: string, name: string) => ({ rowId: `r${rowNumber}`, rowNumber, id, name })
+const group = (repo: string, people: ReturnType<typeof who>[], isFork = false): RepoGroup => ({
+  repo,
+  nameWithOwner: repo,
+  isFork,
+  people,
 })
 
-const info: ReportInfo = {
-  sheetName: 'Students',
-  checkedAt: Date.parse('2026-10-05T17:59:00Z'),
-  totalTrees: 20,
-  failedTrees: 1,
-  totalPairs: 190,
-  zone: 'Asia/Dhaka (UTC+6)',
+type Setup = { groups: RepoGroup[]; trees: RepoFiles[]; errors?: Record<string, TreeError>; leftOut?: Plan['leftOut'] }
+
+function input({ groups, trees, errors = {}, leftOut = [] }: Setup): ReportInput {
+  const plan: Plan = {
+    groups,
+    inputs: groups.map((entry) => ({ repo: entry.repo, headOid: sha(entry.repo), branch: 'main' })),
+    leftOut,
+    waiting: 0,
+  }
+  const treeMap = new Map(trees.map((entry) => [entry.repo, entry]))
+  const loaded: Loaded = { trees: treeMap, errors: new Map(Object.entries(errors)) }
+  const analysis = analyse(trees)
+  return {
+    summary: summarise(plan, loaded, analysis),
+    analysis,
+    trees: treeMap,
+    info: {
+      fileName: 'section-b.xlsx',
+      sheetName: 'Students',
+      checkedAt: Date.parse('2026-10-05T17:59:00Z'),
+      zone: 'Asia/Dhaka (UTC+6)',
+    },
+  }
 }
 
 /** Writes the workbook to bytes and reads it back, as Excel would. */
-function roundTrip(pairs: ReportPair[], details = info) {
-  const bytes = XLSX.write(buildReportWorkbook(pairs, details), { type: 'array', bookType: 'xlsx' })
-  const book = XLSX.read(bytes, { type: 'array', cellFormula: true })
-  return { book, results: book.Sheets.Results, about: book.Sheets.Info }
+function roundTrip(setup: Setup) {
+  const bytes = XLSX.write(buildReportWorkbook(input(setup)), { type: 'array', bookType: 'xlsx', compression: true })
+  const book = XLSX.read(bytes, { type: 'array', cellFormula: true, cellNF: true })
+  const rows = (name: string) => XLSX.utils.sheet_to_json<unknown[]>(book.Sheets[name], { header: 1, defval: '' })
+  return { book, rows, bytes }
+}
+
+const work = { 'app.js': 'the work', 'view.js': 'the view', 'data.js': 'the data' }
+const klass: Setup = {
+  groups: [
+    group('rahim/task-1', [who(2, '20-41234-1', 'Rahim Uddin'), who(6, '20-41238-1', 'Farhana Akter')]),
+    group('karim/task-1', [who(3, '20-41235-1', 'Karim Hasan')], true),
+    group('salma/task-1', [who(4, '20-41236-1', 'Salma Akter')]),
+    group('tania/gone', [who(5, '20-41237-1', 'Tania Islam')]),
+  ],
+  trees: [
+    tree('rahim/task-1', work),
+    tree('karim/task-1', { 'main.js': 'the work', 'view.js': 'the view', 'data.js': 'karim changed this' }),
+    tree('salma/task-1', { 'solo.js': 'her own work' }),
+  ],
+  errors: { 'tania/gone': { kind: 'not_found', message: 'GitHub no longer shows this repo. It may be private or deleted now.' } },
+  leftOut: [{ person: who(7, '20-41239-1', 'Fahim Morshed'), rawLink: 'will send later', reason: 'Link could not be read' }],
 }
 
 describe('buildReportWorkbook', () => {
-  it('keeps the given pair order and writes the header row', () => {
-    const { book, results } = roundTrip([
-      pair({ aId: 'B' }),
-      pair({ aId: 'A' }),
-      pair({ aId: 'C' }),
+  it('has one sheet for each question a teacher asks', () => {
+    expect(roundTrip(klass).book.SheetNames).toEqual([
+      'Pairs',
+      'Matching files',
+      'Same repo',
+      'People',
+      'Starter files',
+      'Info',
     ])
-    expect(book.SheetNames).toEqual(['Results', 'Info'])
-    expect(results.A1.v).toBe('A ID')
-    expect(results.B1.v).toBe('A name')
-    expect(results.E1.v).toBe('B ID')
-    expect([results.A2.v, results.A3.v, results.A4.v]).toEqual(['B', 'A', 'C'])
   })
 
-  it('writes overlap percentage as a number and overlap/union as numbers', () => {
-    const { results } = roundTrip([pair({ score: 0.5, overlap: 4, union: 8 })])
-    // The "Overlap %" column should be a numeric Excel serial / number,
-    // not a string with a percent sign.
-    expect(results.H2).toMatchObject({ t: 'n', v: 50 })
-    expect(results.I2).toMatchObject({ t: 'n', v: 4 })
-    expect(results.J2).toMatchObject({ t: 'n', v: 8 })
-  })
-
-  it('joins path lists with newlines and writes them as plain text', () => {
-    const { results } = roundTrip([pair()])
-    // Shared/paths, A only, B only → K/L/M
-    expect(results.K2.t).toBe('s')
-    expect(results.K2.v).toBe('README.md\nindex.html\nstyle.css\nsrc/main.js\nsrc/util.js')
-    expect(results.L2.v).toBe('secret.md')
-    expect(results.M2.v).toBe('images/logo.png')
-  })
-
-  it('never writes a formula, even when an id or name starts with "="', () => {
-    const { results } = roundTrip([
-      pair({
-        aId: '=SUM(A1)',
-        aName: '+cmd|" /C calc"!A0',
-        bName: '@HYPERLINK("https://evil.example","click")',
-        onlyA: ['=1+1'],
-      }),
+  it('writes one row per pair, with both repos named and linked', () => {
+    const { book, rows } = roundTrip(klass)
+    const [header, first] = rows('Pairs')
+    expect(header).toEqual([
+      'Pair', 'Result', 'Match', 'A ID', 'A name', 'A repo', 'B ID', 'B name', 'B repo',
+      'Identical files', 'Share of A', 'A files compared', 'Share of B', 'B files compared',
+      'Same name, other content', 'Note',
     ])
-    for (const address of ['A2', 'B2', 'E2', 'F2', 'L2']) {
-      expect(results[address].t, address).toBe('s')
-      expect(results[address].f, address).toBeUndefined()
+    expect(rows('Pairs')).toHaveLength(2)
+    expect(first.slice(0, 2)).toEqual([1, 'Mostly identical'])
+    expect(first.slice(3, 9)).toEqual([
+      '20-41234-1; 20-41238-1',
+      'Rahim Uddin; Farhana Akter',
+      'https://github.com/rahim/task-1',
+      '20-41235-1',
+      'Karim Hasan',
+      'https://github.com/karim/task-1',
+    ])
+    expect(first.slice(9)).toEqual([2, 2 / 3, 3, 2 / 3, 3, 1, 'B is a fork'])
+    expect(book.Sheets.Pairs.F2.l?.Target).toBe('https://github.com/rahim/task-1')
+    expect(book.Sheets.Pairs.I2.l?.Target).toBe('https://github.com/karim/task-1')
+  })
+
+  it('writes shares as real numbers that Excel shows as a percentage', () => {
+    const pairs = roundTrip(klass).book.Sheets.Pairs
+    expect(pairs.C2).toMatchObject({ t: 'n', v: 2 / 3 })
+    expect(XLSX.SSF.format('0%', pairs.C2.v)).toBe('67%')
+    expect(pairs.C2.z).toBe('0%')
+    expect(pairs.K2.z).toBe('0%')
+  })
+
+  it('names every matching file, with both paths when a copy was renamed', () => {
+    const { rows } = roundTrip(klass)
+    expect(rows('Matching files')).toEqual([
+      ['Pair', 'A name', 'B name', 'What', 'Path in A', 'Path in B', 'Size (bytes)'],
+      [1, 'Rahim Uddin; Farhana Akter', 'Karim Hasan', 'Identical content', 'app.js', 'main.js', 2000],
+      [1, 'Rahim Uddin; Farhana Akter', 'Karim Hasan', 'Identical content', 'view.js', 'view.js', 2000],
+      [1, 'Rahim Uddin; Farhana Akter', 'Karim Hasan', 'Same name, other content', 'data.js', 'data.js', ''],
+    ])
+  })
+
+  it('lists the repos that more than one person handed in', () => {
+    expect(roundTrip(klass).rows('Same repo')).toEqual([
+      ['Repo', 'People', 'IDs', 'Names', 'Sheet rows'],
+      ['https://github.com/rahim/task-1', 2, '20-41234-1; 20-41238-1', 'Rahim Uddin; Farhana Akter', '2, 6'],
+    ])
+  })
+
+  it('accounts for every row of the uploaded sheet on the People sheet', () => {
+    const people = roundTrip(klass).rows('People')
+    expect(people[0]).toEqual([
+      'Row', 'ID', 'Name', 'Repo', 'Compared', 'Files compared', 'Starter files', 'Other files left out',
+      'Closest match', 'Closest match %', 'Closest result', 'Pairs mostly identical or more', 'Note',
+    ])
+    expect(people.slice(1).map((row) => [row[0], row[2], row[4], row[12]])).toEqual([
+      [2, 'Rahim Uddin', 'Yes', 'Same repo as row 6'],
+      [3, 'Karim Hasan', 'Yes', ''],
+      [4, 'Salma Akter', 'Yes', ''],
+      [5, 'Tania Islam', 'No', 'GitHub no longer shows this repo. It may be private or deleted now.'],
+      [6, 'Farhana Akter', 'Yes', 'Same repo as row 2'],
+      [7, 'Fahim Morshed', 'No', 'Link could not be read'],
+    ])
+    // Rahim: 3 files compared, none starter, 40 left out, closest is Karim at 67%.
+    expect(people[1].slice(5, 12)).toEqual([3, 0, 40, '20-41235-1 · Karim Hasan', 2 / 3, 'Mostly identical', 1])
+    // Salma took part and matched nobody; Fahim's cell is shown as typed, not as a link.
+    expect(people[3].slice(8, 12)).toEqual(['', '', '', 0])
+    expect(people[6][3]).toBe('will send later')
+    expect(people[6].slice(5, 12)).toEqual(['', '', '', '', '', '', ''])
+  })
+
+  it('lists the starter files that were left out', () => {
+    const starter = { 'starter/a.js': 'handed out a', 'starter/b.js': 'handed out b' }
+    const groups = ['s1', 's2', 's3', 's4', 's5', 's6'].map((owner, i) => group(`${owner}/task`, [who(i + 2, `id-${i}`, owner)]))
+    const trees = groups.map((entry) => tree(entry.repo, { ...starter, 'own.js': `own ${entry.repo}` }))
+    const { rows } = roundTrip({ groups, trees })
+    expect(rows('Starter files')).toEqual([
+      ['File', 'Found in repos', 'Size (bytes)'],
+      ['starter/a.js', 6, 2000],
+      ['starter/b.js', 6, 2000],
+    ])
+    expect(rows('Pairs')).toHaveLength(1)
+  })
+
+  it('never writes a formula, even when a name, ID or path starts with "="', () => {
+    const { book } = roundTrip({
+      groups: [
+        group('a/x', [who(2, '=SUM(A1)', '+cmd|" /C calc"!A0')]),
+        group('b/y', [who(3, '@id', '=HYPERLINK("https://evil.example","click")')]),
+      ],
+      trees: [
+        tree('a/x', { '=1+1.js': 'shared', 'b.js': 'shared 2', 'c.js': 'shared 3' }),
+        tree('b/y', { '=1+1.js': 'shared', 'b.js': 'shared 2', 'c.js': 'shared 3' }),
+      ],
+    })
+    for (const name of book.SheetNames) {
+      const sheet = book.Sheets[name]
+      for (const address of Object.keys(sheet)) {
+        if (address.startsWith('!')) continue
+        expect(sheet[address].f, `${name}!${address}`).toBeUndefined()
+      }
     }
-    expect(results.A2.v).toBe('=SUM(A1)')
-    expect(results.L2.v).toBe('=1+1')
+    expect(book.Sheets.Pairs.D2).toMatchObject({ t: 's', v: '=SUM(A1)' })
+    expect(book.Sheets.Pairs.H2).toMatchObject({ t: 's', v: '=HYPERLINK("https://evil.example","click")' })
+    expect(book.Sheets['Matching files'].E2).toMatchObject({ t: 's', v: '=1+1.js' })
   })
 
-  it('leaves unknown values blank and writes shared count as a number', () => {
-    const { results } = roundTrip([
-      pair({ aId: '', aName: '', bId: '', bName: '', overlap: 0, union: 0, score: 0 }),
-    ])
-    expect(results.A2.v).toBe('')
-    expect(results.B2.v).toBe('')
-    expect(results.E2.v).toBe('')
-    expect(results.F2.v).toBe('')
-    expect(results.H2).toMatchObject({ t: 'n', v: 0 })
-    expect(results.I2).toMatchObject({ t: 'n', v: 0 })
-  })
-
-  it('records the source sheet, checked-at time and zone on the Info sheet', () => {
+  it('records how the report was made on the Info sheet', () => {
     process.env.TZ = 'Asia/Dhaka'
-    const { about } = roundTrip([pair()])
-    expect(about.A1.v).toBe('Source sheet')
-    expect(about.B1.v).toBe('Students')
-    expect(XLSX.SSF.format('yyyy-mm-dd hh:mm', about.B3.v)).toBe('2026-10-05 23:59')
-    expect(about.B5.v).toBe('Asia/Dhaka (UTC+6)')
-    expect(about.B6.v).toBe(20) // totalTrees
-    expect(about.B7.v).toBe(1) // failedTrees
-    expect(about.B8.v).toBe(190) // totalPairs
+    const { book, rows } = roundTrip(klass)
+    const info = new Map(rows('Info').map((row) => [row[0] as string, row[1]]))
+    expect(info.get('Source file')).toBe('section-b.xlsx')
+    expect(info.get('Sheet')).toBe('Students')
+    expect(XLSX.SSF.format('yyyy-mm-dd hh:mm', book.Sheets.Info.B3.v)).toBe('2026-10-05 23:59')
+    expect(info.get('Time zone of all dates')).toBe('Asia/Dhaka (UTC+6)')
+    expect(info.get('People in the sheet')).toBe(6)
+    expect(info.get('People compared')).toBe(4)
+    expect(info.get('People not compared')).toBe(2)
+    expect(info.get('Repos compared')).toBe(3)
+    expect(info.get('Repos handed in by more than one person')).toBe(1)
+    expect(info.get('Pairs that could be formed')).toBe(3)
+    expect(info.get('Pairs with identical files')).toBe(1)
+    expect(info.get('Pairs mostly identical or more')).toBe(1)
+    expect(info.get('Matching files listed')).toBe(3)
+    expect(info.get('Starter-file limit')).toBe(4)
+    expect(info.get('Starter files left out')).toBe(0)
+    expect(String(info.get('What "identical" means'))).toMatch(/byte for byte/)
+    expect(String(info.get('What this cannot see'))).toMatch(/not a verdict/)
+    // No label twice.
+    expect(info.size).toBe(rows('Info').length)
   })
 
-  it('describes how similarity was computed in plain English', () => {
-    const { about } = roundTrip([pair()])
-    expect(about.A9.v).toBe('Method')
-    expect(about.B9.v).toMatch(/Jaccard/i)
-    expect(about.B9.v).toMatch(/file names/i)
+  it('still writes a valid file when a pair shares thousands of files', () => {
+    const many: Record<string, string> = {}
+    for (let i = 0; i < 3000; i++) many[`src/some/rather/long/folder/name/component-number-${i}.jsx`] = `content ${i}`
+    const setup: Setup = {
+      groups: [group('a/big', [who(2, '1', 'A')]), group('b/big', [who(3, '2', 'B')])],
+      trees: [tree('a/big', many), tree('b/big', many)],
+    }
+    const { rows } = roundTrip(setup)
+    const files = rows('Matching files')
+    expect(files).toHaveLength(1 + MAX_FILES_PER_PAIR + 1)
+    expect(files[files.length - 1].slice(3, 5)).toEqual(['Not listed', '2,500 more files'])
+    expect(rows('Pairs')[1][9]).toBe(3000)
+  })
+
+  it('writes an empty but complete workbook when nothing matches', () => {
+    const { book, rows } = roundTrip({
+      groups: [group('a/x', [who(2, '1', 'A')]), group('b/y', [who(3, '2', 'B')])],
+      trees: [tree('a/x', { 'a.js': 'one' }), tree('b/y', { 'b.js': 'two' })],
+    })
+    expect(book.SheetNames).toHaveLength(6)
+    expect(rows('Pairs')).toHaveLength(1)
+    expect(rows('Matching files')).toHaveLength(1)
+    expect(rows('People')).toHaveLength(3)
   })
 })
 
 describe('reportFileName', () => {
-  it('names the file after the check time in local zone', () => {
+  it('names the file after the check time in the local zone', () => {
     process.env.TZ = 'Asia/Dhaka'
-    expect(reportFileName(Date.parse('2026-10-05T17:59:00Z'))).toBe(
-      'similarity-2026-10-05-2359.xlsx',
-    )
+    expect(reportFileName(Date.parse('2026-10-05T17:59:00Z'))).toBe('similarity-2026-10-05-2359.xlsx')
   })
 
   it('produces a four-digit time even when minutes are zero', () => {
     process.env.TZ = 'Asia/Dhaka'
-    expect(reportFileName(Date.parse('2026-10-05T18:00:00Z'))).toBe(
-      'similarity-2026-10-06-0000.xlsx',
-    )
+    expect(reportFileName(Date.parse('2026-10-05T18:00:00Z'))).toBe('similarity-2026-10-06-0000.xlsx')
   })
 })
 
 describe('downloadReport', () => {
-  it('writes the workbook to disk with the right name and compression', () => {
-    let captured: { name: string; compression: boolean | undefined } | null = null
-    const writer = ((_book: unknown, name: string, options?: { compression?: boolean }) => {
-      captured = { name, compression: options?.compression }
-      return undefined as unknown as void
+  it('saves the workbook under the right name, compressed', () => {
+    let captured: { sheets: string[]; name: string; compression: boolean | undefined } | null = null
+    const writer = ((book: XLSX.WorkBook, name: string, options?: { compression?: boolean }) => {
+      captured = { sheets: book.SheetNames, name, compression: options?.compression }
     }) as typeof XLSX.writeFile
     process.env.TZ = 'Asia/Dhaka'
-    downloadReport([pair()], { ...info, checkedAt: Date.parse('2026-10-05T17:59:00Z') }, writer)
-    expect(captured).toEqual({ name: 'similarity-2026-10-05-2359.xlsx', compression: true })
+    downloadReport(input(klass), writer)
+    expect(captured).toEqual({
+      sheets: ['Pairs', 'Matching files', 'Same repo', 'People', 'Starter files', 'Info'],
+      name: 'similarity-2026-10-05-2359.xlsx',
+      compression: true,
+    })
   })
 })

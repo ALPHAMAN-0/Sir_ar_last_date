@@ -430,36 +430,110 @@ describe('/status', () => {
 })
 
 describe('/tree', () => {
-  it('sends the token to GitHub and returns cleaned blob paths', async () => {
-    const calls = stubFetch(() =>
-      new Response(
-        JSON.stringify({
-          tree: [
-            { path: 'README.md', type: 'blob' },
-            { path: 'src', type: 'tree' },
-            { path: 'src/main.js', type: 'blob' },
-          ],
-          truncated: false,
-        }),
-      ),
-    )
+  const BLOB = 'b'.repeat(40)
+  const DIR = 'd'.repeat(40)
+  const treeBody = (extra: object[] = [], truncated = false) =>
+    JSON.stringify({
+      sha: SHA,
+      tree: [
+        { path: 'README.md', mode: '100644', type: 'blob', sha: BLOB, size: 120, url: 'https://api.github.com/x' },
+        { path: 'src', mode: '040000', type: 'tree', sha: DIR, url: 'https://api.github.com/y' },
+        { path: 'src/main.js', mode: '100644', type: 'blob', sha: 'c'.repeat(40), size: 900 },
+        ...extra,
+      ],
+      truncated,
+    })
+
+  it('sends the token to GitHub and returns each file with its content hash and size', async () => {
+    const calls = stubFetch(() => new Response(treeBody()))
     const { res, body } = await get(treeUrl({ repo: 'octocat/hello-world', sha: SHA }))
     expect(res.status).toBe(200)
-    expect(res.headers.get('cache-control')).toBe('public, max-age=0, s-maxage=60')
-    expect(body.paths).toEqual(['README.md', 'src/main.js'])
-    expect(body.truncated).toBe(false)
-
+    expect(body).toEqual({
+      files: [
+        { path: 'README.md', sha: BLOB, size: 120 },
+        { path: 'src/main.js', sha: 'c'.repeat(40), size: 900 },
+      ],
+      dirs: [],
+      tooLarge: false,
+    })
     const [call] = githubCalls(calls)
     expect(call.url).toBe(`https://api.github.com/repos/octocat/hello-world/git/trees/${SHA}?recursive=1`)
     expect(new Headers(call.init.headers).get('authorization')).toBe(`Bearer ${TOKEN}`)
   })
 
-  it('maps 404 from GitHub to a not-found response with edge caching', async () => {
-    stubFetch(() => new Response('{}', { status: 404 }))
+  it('caches the answer long, because a commit id never points at other files', async () => {
+    stubFetch(() => new Response(treeBody()))
+    const { res } = await get(treeUrl({ repo: 'octocat/hello-world', sha: SHA }))
+    expect(res.headers.get('cache-control')).toBe('public, max-age=604800, immutable')
+  })
+
+  it('lists one folder level, with its sub-folders, for a flat request', async () => {
+    const calls = stubFetch(() => new Response(treeBody()))
+    const { body } = await get(treeUrl({ repo: 'octocat/hello-world', sha: SHA, flat: true }))
+    expect(githubCalls(calls)[0].url).toBe(
+      `https://api.github.com/repos/octocat/hello-world/git/trees/${SHA}`,
+    )
+    expect(body.dirs).toEqual([{ path: 'src', sha: DIR }])
+    expect(body.files.map((file: { path: string }) => file.path)).toContain('README.md')
+  })
+
+  it('leaves out submodules and entries without a usable hash', async () => {
+    stubFetch(() =>
+      new Response(
+        treeBody([
+          { path: 'vendor/lib', type: 'commit', sha: 'e'.repeat(40) },
+          { path: 'broken.txt', type: 'blob', sha: 'not-a-hash', size: 5 },
+          { path: 'nosize.txt', type: 'blob', sha: 'f'.repeat(40) },
+        ]),
+      ),
+    )
+    const { body } = await get(treeUrl({ repo: 'octocat/hello-world', sha: SHA }))
+    expect(body.files.map((file: { path: string }) => file.path)).toEqual([
+      'README.md',
+      'src/main.js',
+      'nosize.txt',
+    ])
+    expect(body.files[2].size).toBe(0)
+  })
+
+  it('does not parse an oversized listing and says so instead', async () => {
+    const many = Array.from({ length: 6000 }, (_, i) => ({
+      path: `node_modules/pkg-${i}/index.js`,
+      mode: '100644',
+      type: 'blob',
+      sha: String(i).padStart(40, '0'),
+      size: 10,
+      url: `https://api.github.com/repos/octocat/hello-world/git/blobs/${String(i).padStart(40, '0')}`,
+    }))
+    stubFetch(() => new Response(treeBody(many)))
     const { res, body } = await get(treeUrl({ repo: 'octocat/hello-world', sha: SHA }))
-    expect(res.status).toBe(404)
-    expect(body.error.code).toBe('repo_or_sha_not_found')
-    expect(res.headers.get('cache-control')).toBe('public, max-age=0, s-maxage=60')
+    expect(res.status).toBe(200)
+    expect(body).toEqual({ files: [], dirs: [], tooLarge: true })
+    expect(res.headers.get('cache-control')).toBe('public, max-age=604800, immutable')
+  })
+
+  it('treats a listing that GitHub cut short as too large, never as complete', async () => {
+    stubFetch(() => new Response(treeBody([], true)))
+    const { body } = await get(treeUrl({ repo: 'octocat/hello-world', sha: SHA }))
+    expect(body).toEqual({ files: [], dirs: [], tooLarge: true })
+  })
+
+  it('answers a short-lived 404 for a missing repo, an unknown commit or an empty repo', async () => {
+    for (const status of [404, 422, 409]) {
+      stubFetch(() => new Response('{}', { status }))
+      const { res, body } = await get(treeUrl({ repo: 'octocat/hello-world', sha: SHA }))
+      expect(res.status, String(status)).toBe(404)
+      expect(body.error.code).toBe('repo_or_sha_not_found')
+      expect(res.headers.get('cache-control')).toBe('public, max-age=0, s-maxage=60')
+    }
+  })
+
+  it('answers 502 when GitHub sends something that is not a file list', async () => {
+    stubFetch(() => new Response('<html>oops</html>'))
+    const { res, body } = await get(treeUrl({ repo: 'octocat/hello-world', sha: SHA }))
+    expect(res.status).toBe(502)
+    expect(body.error.code).toBe('github_error')
+    expect(res.headers.get('cache-control')).toBe('no-store')
   })
 
   it('rejects malformed queries with 400 and never calls GitHub', async () => {
@@ -469,6 +543,10 @@ describe('/tree', () => {
       '/api/v1/tree?repo=Octocat%2FHello-World&sha=' + SHA,
       '/api/v1/tree?repo=octocat%2Fhello-world',
       '/api/v1/tree?repo=octocat%2Fhello-world&sha=not-a-sha',
+      `/api/v1/tree?repo=octocat%2Fhello-world&sha=${SHA}&flat=0`,
+      `/api/v1/tree?repo=octocat%2Fhello-world&sha=${SHA}&flat=true`,
+      `/api/v1/tree?flat=1&repo=octocat%2Fhello-world&sha=${SHA}`,
+      `/api/v1/tree?repo=octocat%2Fhello-world&sha=${SHA}&recursive=1`,
     ]) {
       const { res, body } = await get(path)
       expect(res.status, path).toBe(400)
@@ -478,9 +556,7 @@ describe('/tree', () => {
   })
 
   it('counts against RL_TREE, not RL_REST', async () => {
-    stubFetch(() =>
-      new Response(JSON.stringify({ tree: [{ path: 'a', type: 'blob' }], truncated: false })),
-    )
+    stubFetch(() => new Response(treeBody()))
     const { res, body } = await get(
       treeUrl({ repo: 'octocat/hello-world', sha: SHA }),
       makeEnv({ RL_TREE: limiter(false) }),

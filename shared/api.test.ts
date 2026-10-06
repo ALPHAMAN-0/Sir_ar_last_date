@@ -7,7 +7,9 @@ import {
   parseCommitQuery,
   parseCommitsQuery,
   parseReposQuery,
+  parseTreeQuery,
   reposUrl,
+  treeUrl,
 } from './api.ts'
 import {
   isBranchName,
@@ -139,5 +141,30 @@ describe('commits and commit queries', () => {
     expect(parseCommitQuery(`?repo=a%2Fx&sha=${SHA}&page=1`)).toBeNull()
     expect(parseCommitQuery(`?repo=a%2Fx&sha=${SHA}&page=31`)).toBeNull()
     expect(parseCommitQuery(`?repo=a%2Fx&sha=main`)).toBeNull()
+  })
+})
+
+describe('tree query', () => {
+  it('round-trips with and without the flat switch', () => {
+    expect(treeUrl({ repo: 'a/x', sha: SHA })).toBe(`/api/v1/tree?repo=a%2Fx&sha=${SHA}`)
+    expect(parseTreeQuery(search(treeUrl({ repo: 'a/x', sha: SHA })))).toEqual({ repo: 'a/x', sha: SHA })
+    expect(parseTreeQuery(search(treeUrl({ repo: 'a/x', sha: SHA, flat: true })))).toEqual({
+      repo: 'a/x',
+      sha: SHA,
+      flat: true,
+    })
+  })
+
+  it('spells "not flat" one way only, so the edge cache has one key per listing', () => {
+    expect(treeUrl({ repo: 'a/x', sha: SHA, flat: false })).toBe(treeUrl({ repo: 'a/x', sha: SHA }))
+    for (const bad of [
+      `?repo=a%2Fx&sha=${SHA}&flat=0`,
+      `?repo=a%2Fx&sha=${SHA}&flat=1&flat=1`,
+      `?sha=${SHA}&repo=a%2Fx`,
+      `?repo=a%2Fx&sha=main`,
+      `?repo=a%2Fx&sha=${SHA}&depth=2`,
+    ]) {
+      expect(parseTreeQuery(bad), bad).toBeNull()
+    }
   })
 })

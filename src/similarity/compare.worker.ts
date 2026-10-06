@@ -1,22 +1,16 @@
-// Web Worker that runs compareAll off the main thread so the UI never
-// blocks on a large class size. The page spawns this with:
+// Runs the comparison off the main thread, so the page stays responsive while
+// a large class is compared. The page spawns it with:
 //
-//   const worker = new Worker(
-//     new URL('./compare.worker.ts', import.meta.url),
-//     { type: 'module' },
-//   )
-//   worker.postMessage({ trees })
-//   worker.addEventListener('message', (event) => { ... event.data.pairs ... })
+//   new Worker(new URL('./compare.worker.ts', import.meta.url), { type: 'module' })
+//
+// Only numbers travel back: one small summary per pair, never the file lists.
 
-import { compareAll } from './compare.ts'
-import type { FileTree, Pair } from './types.ts'
+import { analyse } from './compare.ts'
+import type { RepoFiles } from './types.ts'
 
-type InMessage = { trees: Array<[string, FileTree]> }
-type OutMessage = { pairs: Pair[] }
+export type CompareRequest = { repos: RepoFiles[]; commonLimit?: number }
 
-self.addEventListener('message', (event: MessageEvent<InMessage>) => {
-  const trees = new Map<string, FileTree>(event.data.trees)
-  const pairs = compareAll(trees)
-  const out: OutMessage = { pairs }
-  ;(self as unknown as Worker).postMessage(out)
+self.addEventListener('message', (event: MessageEvent<CompareRequest>) => {
+  const result = analyse(event.data.repos, { commonLimit: event.data.commonLimit })
+  ;(self as unknown as Worker).postMessage(result)
 })
