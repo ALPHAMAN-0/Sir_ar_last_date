@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as XLSX from 'xlsx'
 import { ZERO_OID } from '../../shared/validate.ts'
 import { formatDateTime, formatDuration, parseDeadlineInput } from '../logic/time.ts'
 import {
@@ -108,6 +109,52 @@ describe('the register', () => {
         column: 'name',
         descending: false,
       })
+    })
+  })
+
+  describe('downloading', () => {
+    /** Files the page handed to the browser, instead of saving them. */
+    let saved: Array<{ bytes: Uint8Array; name: string }>
+    const useSaver = (save: (bytes: Uint8Array, name: string) => void) =>
+      vi.doMock('../sheet/xlsxStyle.ts', async (original) => ({
+        ...(await original<typeof import('../sheet/xlsxStyle.ts')>()),
+        saveFile: save,
+      }))
+    beforeEach(() => {
+      saved = []
+      useSaver((bytes, name) => saved.push({ bytes, name }))
+    })
+    afterEach(() => {
+      vi.doUnmock('../sheet/xlsxStyle.ts')
+      vi.restoreAllMocks()
+    })
+
+    it('writes the rows on screen as a report that says it was filtered', async () => {
+      await openRegister()
+      fireEvent.click(chip(/Not found/))
+      fireEvent.click(screen.getByRole('button', { name: 'Download 1 row' }))
+      await waitFor(() => expect(saved).toHaveLength(1))
+
+      expect(saved[0].name).toMatch(/^results-\d{4}-\d{2}-\d{2}-\d{4}\.xlsx$/)
+      const book = XLSX.read(saved[0].bytes, { type: 'array' })
+      expect(book.SheetNames).toEqual(['Summary', 'Results', 'Needs attention', 'Same repo', 'Info'])
+      const summary = XLSX.utils.sheet_to_json<unknown[]>(book.Sheets.Summary, { header: 1 })
+      expect(summary.find((line) => line[0] === 'People in this file')?.[1]).toBe(
+        '1 of 4 (filtered by Status: Not found)',
+      )
+      expect(book.Sheets.Results.C2.v).toBe('Arif Hossain')
+    })
+
+    it('says so when the file cannot be written', async () => {
+      useSaver(() => {
+        throw new Error('disk full')
+      })
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      await openRegister()
+      fireEvent.click(screen.getByRole('button', { name: 'Download .xlsx' }))
+      expect((await screen.findByRole('alert')).textContent).toBe(
+        'The results file could not be written. Please try again.',
+      )
     })
   })
 
