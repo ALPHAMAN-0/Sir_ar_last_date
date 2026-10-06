@@ -5,7 +5,9 @@ links, set a deadline, and see who pushed in time, who did not, which files
 changed on which date, and which repos hold identical files.
 
 No login is needed. The sheet is read inside the browser; names and IDs are never
-sent to a server.
+sent to a server. The page keeps the sheet and the deadline in this browser, so
+they are still there after a reload, until **Clear** on the Register removes them.
+On a shared computer, press Clear when you are done.
 
 - [What it does](#what-it-does)
 - [How it fits together](#how-it-fits-together)
@@ -247,6 +249,8 @@ written as plain text, never as formulas.
 
 ## Run it on your computer
 
+Needs Node 22.22 or newer (`.nvmrc` says 22).
+
 ```sh
 npm install
 cp .dev.vars.example .dev.vars   # then put your GitHub token in it
@@ -259,10 +263,14 @@ access and **no permissions**. Create one at
 `.dev.vars` is ignored by git; never commit a token.
 
 ```sh
-npm test         # unit tests
-npm run lint     # oxlint
-npm run build    # type-check and build
+npm test           # unit and screen tests
+npm run coverage   # the same, with a coverage report in coverage/
+npm run lint       # oxlint
+npm run build      # type-check and build
 ```
+
+GitHub Actions runs lint, tests and build on every push to `main` and every pull
+request (`.github/workflows/ci.yml`). It does not deploy.
 
 ## Put it online (Cloudflare Workers, free plan)
 
