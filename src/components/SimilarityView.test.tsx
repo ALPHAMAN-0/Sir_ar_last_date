@@ -417,7 +417,7 @@ describe('who had it first', () => {
     const row = pairRows()[0]
     await waitFor(() => expect(whoCell(row).textContent).toBe('A firstB likely copied from A'))
     // The repos' own facts settle it: no push log is asked for.
-    expect(fake.fetch.mock.calls.some(([input]) => String(input).includes('/api/v1/activity'))).toBe(false)
+    expect(fake.fetch.mock.calls.map(([input]) => String(input)).filter((url) => url.includes('/api/v1/activity'))).toEqual([])
     fireEvent.click(within(row).getByRole('button', { name: 'Show files' }))
     expect(lines()[0]).toBe("B's repo is a GitHub fork of A's repo")
   })

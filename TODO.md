@@ -41,6 +41,13 @@ rewrite (deployed 2026-10-06, version 4f73fa07).
       the same way the person screen reads it (see README, "The results report").
 
 ## Not done
+- [ ] Go online from GitHub Actions only when the tests pass (2026-10-07). The
+      `deploy` job is written (`.github/workflows/ci.yml`; README, "Put it online").
+      Still to do, in this order: add the `CLOUDFLARE_API_TOKEN` secret on GitHub,
+      watch one push go online through the job, then disconnect the repo under the
+      Worker's **Settings > Builds** at Cloudflare. That connection deploys every
+      push without waiting for the tests: commit `94c21d7` went online on
+      2026-10-06 with 4 failing tests.
 - [ ] Run "who had it first" once on the local Worker with a real token. Everything
       else was checked without one; this is the only check of the new `parent` and
       `templateRepository` fields against GitHub itself (their names were checked
@@ -62,4 +69,4 @@ rewrite (deployed 2026-10-06, version 4f73fa07).
   token-level comparison for edited copies was considered on 2026-10-07 and
   decided against.
 - By-date screen across all people, inline diff viewer, fork-aware logic,
-  per-row deadlines, access code, private repos, auto-deploy on push.
+  per-row deadlines, access code, private repos.

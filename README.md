@@ -371,9 +371,12 @@ npm run build      # type-check and build
 ```
 
 GitHub Actions runs lint, tests and build on every push to `main` and every pull
-request (`.github/workflows/ci.yml`). It does not deploy.
+request (`.github/workflows/ci.yml`). After a push to `main` it also puts the app
+online, but only when all three passed (see the next section).
 
 ## Put it online (Cloudflare Workers, free plan)
+
+The first time, from your computer:
 
 ```sh
 npx wrangler login                     # once
@@ -384,7 +387,36 @@ npm run deploy
 The address is `https://sir-ar-last-date.<your-subdomain>.workers.dev`.
 
 To replace an expired token, run the `secret put` command again. Nothing else
-needs to change. After changing code, run `npm run deploy` again.
+needs to change.
+
+### After that, a push puts it online
+
+A push to `main` starts two jobs on GitHub, one after the other:
+
+```mermaid
+flowchart LR
+  P["Push to main"] --> C["check<br/>lint, all tests, build"]
+  C -- passed --> D["deploy<br/>npm run deploy"]
+  C -- failed --> X["Nothing is deployed.<br/>The version online stays."]
+  D --> L["Online at Cloudflare"]
+```
+
+The `deploy` job needs two repository secrets. Add them once on GitHub, under
+**Settings > Secrets and variables > Actions**:
+
+| Secret | What to put in it |
+|--------|-------------------|
+| `CLOUDFLARE_API_TOKEN` | A Cloudflare API token with the **Edit Cloudflare Workers** permissions. [How to make one](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/). |
+| `CLOUDFLARE_ACCOUNT_ID` | The account ID that `npx wrangler whoami` prints. |
+
+If `deploy` fails with an authentication error, the Cloudflare token has expired
+or was deleted: make a new one and save it in the same secret.
+
+Do not also connect this repo under the Worker's **Settings > Builds** in the
+Cloudflare dashboard. That builds and deploys every push at Cloudflare without
+waiting for the tests.
+
+`npm run deploy` from your computer still works. It does not run the tests.
 
 ## Limits and protection
 

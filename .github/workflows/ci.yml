@@ -1,5 +1,10 @@
-# Lint, test and build on every push to main and every pull request.
-# Deploying stays a manual `npm run deploy`, so no Cloudflare or GitHub token is needed here.
+# On every push to main and every pull request: lint, run all the tests, build.
+# On a push to main, once all of that has passed, put the app online at Cloudflare.
+# If anything fails, nothing is deployed and the version online stays as it was.
+#
+# The deploy needs two repository secrets (Settings > Secrets and variables > Actions):
+#   CLOUDFLARE_API_TOKEN   a Cloudflare API token with the "Edit Cloudflare Workers" permissions
+#   CLOUDFLARE_ACCOUNT_ID  the ID of the Cloudflare account that holds the Worker
 name: CI
 
 on:
@@ -10,9 +15,14 @@ on:
 permissions:
   contents: read
 
+# Runs on one branch go one after another, so two quick pushes cannot go online in
+# the wrong order.
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -23,3 +33,20 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  deploy:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
