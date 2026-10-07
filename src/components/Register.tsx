@@ -9,8 +9,17 @@ import {
   toExportRows,
 } from '../logic/people.ts'
 import { formatDateTime, zoneLabel } from '../logic/time.ts'
+import { loadFirstPushes } from '../state/firstPushes.ts'
 import { useApp, useNow, usePeople } from '../state/hooks.ts'
-import { clearSheet, loadFile, refresh, setSearch, setStatusFilter } from '../state/store.ts'
+import {
+  clearSheet,
+  currentPeople,
+  getState,
+  loadFile,
+  refresh,
+  setSearch,
+  setStatusFilter,
+} from '../state/store.ts'
 import { ColumnPicker } from './ColumnPicker.tsx'
 import { DeadlineBox } from './DeadlineBox.tsx'
 import { PauseNotice } from './PauseNotice.tsx'
@@ -32,6 +41,8 @@ export function Register() {
   const [picking, setPicking] = useState(false)
   const [confirmingClear, setConfirmingClear] = useState(false)
   const [downloadFailed, setDownloadFailed] = useState(false)
+  /** Set while a download waits for the first push of each repo. */
+  const [reading, setReading] = useState<{ done: number; total: number } | null>(null)
 
   const deadlinePassed = deadline !== null && now > deadline
   const counts = useMemo(() => countByStatus(people), [people])
@@ -52,21 +63,29 @@ export function Register() {
 
   const download = async () => {
     const stamp = Date.now()
-    const filters = [
-      statusFilter === 'all' ? '' : `Status: ${statusLabel(statusFilter, deadlinePassed)}`,
-      search.trim() ? `search: "${search.trim()}"` : '',
-    ].filter(Boolean)
     setDownloadFailed(false)
     try {
       // The Excel library is fetched on first use.
       const excel = await import('../sheet/exportXlsx.ts')
+      // The register does not know when a repo was first pushed. That is read now.
+      const firstPushes = await loadFirstPushes(shown, (done, total) => setReading({ done, total }))
+      const latest = getState()
+      // Replaced or removed while reading: the file would be of a sheet no longer on screen.
+      if (latest.sheet !== sheet) return
+      // Reading can settle a row that was still being checked, so the rows are judged again.
+      const rows = sortPeople(filterPeople(currentPeople(), statusFilter, search), sort)
+      const passed = latest.deadline !== null && Date.now() > latest.deadline
+      const filters = [
+        statusFilter === 'all' ? '' : `Status: ${statusLabel(statusFilter, passed)}`,
+        search.trim() ? `search: "${search.trim()}"` : '',
+      ].filter(Boolean)
       excel.downloadWorkbook(
-        excel.buildWorkbook(toExportRows(shown, deadlinePassed), {
+        excel.buildWorkbook(toExportRows(rows, passed, firstPushes), {
           sheetName: sheet.fileName,
-          deadline,
-          checkedAt: checkedAt ?? stamp,
+          deadline: latest.deadline,
+          checkedAt: latest.checkedAt ?? stamp,
           zone: zoneLabel(),
-          totalPeople: people.length,
+          totalPeople: latest.sheet.rows.length,
           filter: filters.length > 0 ? `filtered by ${filters.join(', ')}` : null,
         }),
         excel.exportFileName(stamp),
@@ -74,6 +93,8 @@ export function Register() {
     } catch (error) {
       console.error('The results report could not be written:', error)
       setDownloadFailed(true)
+    } finally {
+      setReading(null)
     }
   }
 
@@ -192,22 +213,30 @@ export function Register() {
           />
         </label>
         <p className="toolbar__checked" aria-live="polite">
-          {checking
-            ? loadingRepos > 0
-              ? `Checking ${repoCount - loadingRepos} of ${repoCount} repos`
-              : 'Checking push times'
-            : checkedAt
-              ? `Checked ${formatDateTime(checkedAt)}`
-              : ''}
+          {reading
+            ? `Reading first pushes for the file: ${reading.done} of ${reading.total} repos`
+            : checking
+              ? loadingRepos > 0
+                ? `Checking ${repoCount - loadingRepos} of ${repoCount} repos`
+                : 'Checking push times'
+              : checkedAt
+                ? `Checked ${formatDateTime(checkedAt)}`
+                : ''}
         </p>
-        <button type="button" className="button" onClick={refresh} disabled={loadingRepos > 0}>
+        {/* A refresh would drop the push logs a download is waiting for. */}
+        <button
+          type="button"
+          className="button"
+          onClick={refresh}
+          disabled={loadingRepos > 0 || reading !== null}
+        >
           Refresh
         </button>
         <button
           type="button"
           className="button"
           onClick={() => void download()}
-          disabled={shown.length === 0}
+          disabled={shown.length === 0 || reading !== null}
         >
           {filtered ? `Download ${shown.length} ${shown.length === 1 ? 'row' : 'rows'}` : 'Download .xlsx'}
         </button>

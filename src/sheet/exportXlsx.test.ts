@@ -31,8 +31,8 @@ const row = (over: Partial<ExportRow> = {}): ExportRow => ({
   needsReview: false,
   lateBy: '',
   lateMinutes: null,
-  notes: '',
   repoCreatedAt: '2026-10-01T04:00:00Z',
+  firstPush: { kind: 'recorded', at: '2026-10-02T03:30:00Z' },
   lastPushAt: '2026-10-05T15:10:00Z',
   lastOnTimePushAt: null,
   lastCommitAt: '2026-10-05T15:09:00Z',
@@ -58,7 +58,7 @@ const klass: ExportRow[] = [
   row({ rowNumber: 6, id: 'A5', ...own('A5'), name: 'Sabbir', status: 'Changed after deadline', statusKey: 'changed_after', lateBy: '9h' }),
   row({ rowNumber: 7, id: 'A6', name: 'Karim', status: 'Invalid link', statusKey: 'invalid_link', repoUrl: null, repoName: 'will send later' }),
   row({ rowNumber: 8, id: 'A7', ...own('A7'), name: 'Lamia', status: 'Not found', statusKey: 'not_found' }),
-  row({ rowNumber: 9, id: 'A8', ...own('A8'), name: 'Rakib', needsReview: true, notes: 'Main branch was created after the deadline' }),
+  row({ rowNumber: 9, id: 'A8', ...own('A8'), name: 'Rakib', needsReview: true }),
 ]
 
 /** Writes the finished, coloured file and reads it back, as Excel would. */
@@ -89,11 +89,16 @@ describe('the results report', () => {
     expect(roundTrip(klass).book.SheetNames).toEqual(['Results', 'Summary', 'Needs attention', 'Same repo', 'Info'])
   })
 
-  it('has the columns of the register in the register\'s order, then the extra ones', () => {
+  it('has the columns of the register in the register\'s order with the first push among the dates, then the extra ones', () => {
     expect(roundTrip([row()]).grid('Results')[0]).toEqual([
-      'Row', 'ID', 'Name', 'Repo', 'Status', 'Notes', 'Late by', 'Repo created', 'Last push', 'Last commit', 'Commits',
+      'Row', 'ID', 'Name', 'Repo', 'Status', 'Late by', 'Repo created', 'First push', 'Last push', 'Last commit', 'Commits',
       'Late (minutes)', 'Last on-time push', 'Branch',
     ])
+  })
+
+  it('has no notes column on any sheet', () => {
+    const { book, grid } = roundTrip(klass)
+    for (const name of book.SheetNames) expect(grid(name)[0], name).not.toContain('Notes')
   })
 
   it('counts every status, with its share, and says what needs a look', () => {
@@ -181,10 +186,10 @@ describe('the results report', () => {
 
   it('colours whole rows on the "Needs attention" sheet too', () => {
     const attention = roundTrip(klass).book.Sheets['Needs attention']
-    expect(rowFills(attention, 1, 'H')).toEqual(['E9E4D6']) // the header
-    expect(rowFills(attention, 2, 'H')).toEqual(['F6CDC8']) // Farhana, late
-    expect(rowFills(attention, 3, 'H')).toEqual(['FBE6B3']) // Sabbir, changed after deadline
-    expect(rowFills(attention, 4, 'H')).toEqual(['E6E6E6']) // Lamia, not found
+    expect(rowFills(attention, 1, 'G')).toEqual(['E9E4D6']) // the header
+    expect(rowFills(attention, 2, 'G')).toEqual(['F6CDC8']) // Farhana, late
+    expect(rowFills(attention, 3, 'G')).toEqual(['FBE6B3']) // Sabbir, changed after deadline
+    expect(rowFills(attention, 4, 'G')).toEqual(['E6E6E6']) // Lamia, not found
   })
 
   it('colours no row on the sheets that are not one row per person', () => {
@@ -203,15 +208,78 @@ describe('the results report', () => {
     // 15:10 UTC is 21:10 in Dhaka.
     expect(results.I2.t).toBe('n')
     expect(XLSX.SSF.format('yyyy-mm-dd hh:mm', results.I2.v)).toBe('2026-10-05 21:10')
-    expect([results.H2.w, results.I2.w, results.J2.w]).toEqual(['01 Oct 2026, 10:00', '05 Oct 2026, 21:10', '05 Oct 2026, 21:09'])
+    // Repo created, first push, last push, last commit.
+    expect([results.G2.w, results.H2.w, results.I2.w, results.J2.w]).toEqual([
+      '01 Oct 2026, 10:00',
+      '02 Oct 2026, 09:30',
+      '05 Oct 2026, 21:10',
+      '05 Oct 2026, 21:09',
+    ])
     expect(results.K2).toMatchObject({ t: 'n', v: 12 })
+  })
+
+  it('marks a first push that is only the date of the first commit, and keeps it a date', () => {
+    process.env.TZ = 'Asia/Dhaka'
+    const { results } = roundTrip([
+      row({ firstPush: { kind: 'commit_date', at: '2021-03-04T05:00:00Z' } }),
+      row(),
+    ])
+    expect(results.H2.t).toBe('n')
+    expect(results.H2.w).toBe('04 Mar 2021, 11:00 (commit date)')
+    expect(XLSX.SSF.format('yyyy-mm-dd hh:mm', results.H2.v)).toBe('2021-03-04 11:00')
+    // A recorded push time carries no mark.
+    expect(results.H3.w).toBe('02 Oct 2026, 09:30')
+    // The mark survives the colour of the row.
+    expect(fill(results.H2)).toBe('D4EFDB')
+  })
+
+  it('keeps the first push column wide enough for a marked date, which Excel would otherwise show as ####', () => {
+    process.env.TZ = 'Asia/Dhaka'
+    const rows = [row({ firstPush: { kind: 'commit_date', at: '2021-03-04T05:00:00Z' } })]
+    const { book } = buildWorkbook(rows, info)
+    const header = XLSX.utils.sheet_to_json<string[]>(book.Sheets.Results, { header: 1 })[0]
+    const width = book.Sheets.Results['!cols']?.[header.indexOf('First push')]?.wch ?? 0
+    expect(width).toBeGreaterThan((roundTrip(rows).results.H2.w as string).length)
+  })
+
+  it('sorts a marked commit date among the push times, oldest first', () => {
+    const { results } = roundTrip([
+      row({ firstPush: { kind: 'recorded', at: '2026-10-02T03:30:00Z' } }),
+      row({ firstPush: { kind: 'commit_date', at: '2021-03-04T05:00:00Z' } }),
+      row({ firstPush: { kind: 'recorded', at: '2024-01-01T00:00:00Z' } }),
+    ])
+    const values = [results.H2.v, results.H3.v, results.H4.v] as number[]
+    expect(values.every((value) => typeof value === 'number')).toBe(true)
+    expect([...values].sort((a, b) => a - b)).toEqual([values[1], values[2], values[0]])
+  })
+
+  it('leaves the cell blank when the first push is no readable date', () => {
+    const { results } = roundTrip([
+      row({ firstPush: { kind: 'recorded', at: 'not a date' } }),
+      row({ firstPush: { kind: 'commit_date', at: '' } }),
+    ])
+    expect([results.H2?.v ?? '', results.H3?.v ?? '']).toEqual(['', ''])
+  })
+
+  it('says in words when the first push is not known, and leaves it blank only for a repo without work', () => {
+    const { results } = roundTrip([
+      row({ firstPush: { kind: 'unknown' } }),
+      row({ firstPush: { kind: 'failed' } }),
+      row({ firstPush: { kind: 'none' }, status: 'No submission', statusKey: 'no_submission' }),
+      // Never read by the time the file was written: that is not the same as no work.
+      row({ firstPush: { kind: 'loading' } }),
+    ])
+    expect(results.H2.v).toBe('Not known')
+    expect(results.H3.v).toBe('Could not be loaded')
+    expect(results.H4?.v ?? '').toBe('')
+    expect(results.H5.v).toBe('Could not be loaded')
   })
 
   it('never writes a formula, even when a cell starts with "="', () => {
     const { results } = roundTrip([
-      row({ name: '=HYPERLINK("https://evil.example","click")', notes: '+1+1', id: '@SUM(A1)' }),
+      row({ name: '=HYPERLINK("https://evil.example","click")', repoName: '+1+1', repoUrl: null, id: '@SUM(A1)' }),
     ])
-    for (const address of ['B2', 'C2', 'F2']) {
+    for (const address of ['B2', 'C2', 'D2']) {
       expect(results[address].t, address).toBe('s')
       expect(results[address].f, address).toBeUndefined()
     }
@@ -222,7 +290,7 @@ describe('the results report', () => {
     const { results } = roundTrip([
       row({ status: 'Late', statusKey: 'late', lateBy: '3h 20m', lateMinutes: 200, commits: null }),
     ])
-    expect(results.G2.v).toBe('3h 20m')
+    expect(results.F2.v).toBe('3h 20m')
     expect(results.L2).toMatchObject({ t: 'n', v: 200 })
     expect(results.M2?.v ?? '').toBe('')
     expect(results.K2?.v ?? '').toBe('')
@@ -230,10 +298,13 @@ describe('the results report', () => {
 
   it('lists who needs attention, most urgent first, with what to do', () => {
     const attention = roundTrip(klass).grid('Needs attention')
-    expect(attention[0]).toEqual(['Row', 'ID', 'Name', 'Repo', 'Status', 'Late by', 'What to do', 'Notes'])
+    expect(attention[0]).toEqual(['Row', 'ID', 'Name', 'Repo', 'Status', 'Late by', 'What to do'])
     expect(attention.slice(1).map((line) => line[2])).toEqual(['Farhana', 'Sabbir', 'Lamia', 'Karim', 'Rakib'])
     expect(attention[1][6]).toBe('Nothing had reached GitHub by the deadline. The first push came 3h 20m after it.')
-    expect(attention[5][6]).toBe('Worth a look yourself: see the notes.')
+    expect(attention[5][6]).toBe('Worth a look yourself. Open this person on the page to see why.')
+    // Seven columns, and a filter button on each.
+    expect(attention.every((line) => line.length === 7)).toBe(true)
+    expect(sheetXml(roundTrip(klass).bytes, 3)).toContain('<autoFilter ref="A1:G6"/>')
   })
 
   it('says so when nobody needs attention and nobody shares a repo', () => {
@@ -256,6 +327,7 @@ describe('the results report', () => {
     expect(about.B2.w).toBe('05 Oct 2026, 23:59')
     expect(about.B4.v).toBe('Asia/Dhaka (UTC+6)')
     expect(grid('Info').map((line) => line[0])).toContain('Status: Changed after deadline')
+    expect(grid('Info').find((line) => line[0] === 'First push')?.[1]).toContain('marked "(commit date)"')
     expect(roundTrip([row()], { ...info, deadline: null }).about.B2.v).toBe('No deadline set')
   })
 })

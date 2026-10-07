@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as XLSX from 'xlsx'
 import { ZERO_OID } from '../../shared/validate.ts'
 import { formatDateTime, formatDuration, parseDeadlineInput } from '../logic/time.ts'
+import { excelDate } from '../sheet/exportXlsx.ts'
 import {
   FETCHED_AT,
   okRepo,
@@ -11,6 +12,7 @@ import {
   saveSheet,
   STORAGE_KEY,
   stubApi,
+  stubIntersectionObserver,
   type RowCells,
 } from '../test/fakeApi.ts'
 
@@ -145,6 +147,117 @@ describe('the register', () => {
       expect(book.Sheets.Results.C2.v).toBe('Arif Hossain')
     })
 
+    it('reads the first push of each repo on screen and writes it between the two other dates', async () => {
+      const CREATED_BY = '2026-09-02T09:00:00Z'
+      const OLDEST = '2021-03-04T05:00:00Z'
+      // One repo has a push log. The other is older than GitHub's log and has only its commits.
+      fake.api.activity['octocat/hello-world'] = [
+        { ts: CREATED_BY, type: 'branch_creation', ref: 'refs/heads/main', before: ZERO_OID, after: oid('octocat/hello-world'), actor: 'rahim' },
+      ]
+      fake.api.commits['octocat/spoon-knife'] = [
+        { oid: oid('oldest'), committedAt: OLDEST, authoredAt: OLDEST, headline: 'Start', parents: [], authorName: 'Nusrat', authorLogin: 'nusrat' },
+      ]
+      await openRegister()
+      expect(fake.paths()).not.toContain('/api/v1/activity')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Download .xlsx' }))
+      await waitFor(() => expect(saved).toHaveLength(1))
+
+      const results = XLSX.read(saved[0].bytes, { type: 'array' }).Sheets.Results
+      const header = XLSX.utils.sheet_to_json<string[]>(results, { header: 1 })[0]
+      expect(header).not.toContain('Notes')
+      expect(header.slice(6, 9)).toEqual(['Repo created', 'First push', 'Last push'])
+      // On screen order: Nusrat, Rahim, then the two rows without a repo.
+      expect([results.C2.v, results.C3.v]).toEqual(['Nusrat Jahan', 'Rahim Uddin'])
+      const serial = (iso: string) => (excelDate(iso) as { v: number }).v
+      expect(results.H3.v).toBeCloseTo(serial(CREATED_BY), 8)
+      expect(results.H3.w).not.toContain('commit date')
+      expect(results.H2.v).toBeCloseTo(serial(OLDEST), 8)
+      expect(results.H2.w).toMatch(/ \(commit date\)$/)
+      expect([results.H4?.v ?? '', results.H5?.v ?? '']).toEqual(['', ''])
+      expect(results.G3.v).toBeCloseTo(serial('2026-09-01T08:00:00Z'), 8)
+      expect(results.I3.v).toBeCloseTo(serial('2026-10-01T08:00:00Z'), 8)
+    })
+
+    it('asks GitHub only about the repos that go into the file', async () => {
+      await openRegister()
+      search('spoon')
+      fireEvent.click(screen.getByRole('button', { name: 'Download 1 row' }))
+      await waitFor(() => expect(saved).toHaveLength(1))
+
+      const logs = fake.fetch.mock.calls.map(([input]) => String(input)).filter((url) => url.includes('/api/v1/activity'))
+      expect(logs).toHaveLength(1)
+      expect(logs[0]).toContain('repo=octocat%2Fspoon-knife')
+      // A filter that leaves no repo with work asks nothing at all.
+      search('')
+      fireEvent.click(chip(/Not found/))
+      fireEvent.click(screen.getByRole('button', { name: 'Download 1 row' }))
+      await waitFor(() => expect(saved).toHaveLength(2))
+      expect(fake.paths().filter((path) => path === '/api/v1/activity')).toHaveLength(1)
+    })
+
+    it('still writes the file when a first push cannot be read, and says so in the cell', async () => {
+      fake.api.activity['octocat/hello-world'] = { failure: { status: 404, code: 'repo_not_found', message: 'This repo was not found.' } }
+      await openRegister()
+      fireEvent.click(screen.getByRole('button', { name: 'Download .xlsx' }))
+      await waitFor(() => expect(saved).toHaveLength(1))
+
+      const results = XLSX.read(saved[0].bytes, { type: 'array' }).Sheets.Results
+      // Nusrat's repo has neither a log nor commits to read here; Rahim's log failed.
+      expect([results.C2.v, results.H2.v]).toEqual(['Nusrat Jahan', 'Not known'])
+      expect([results.C3.v, results.H3.v]).toEqual(['Rahim Uddin', 'Could not be loaded'])
+      expect(screen.queryByRole('alert')).toBeNull()
+      // Without a deadline a failed log changes nobody's status.
+      expect([results.E2.v, results.E3.v]).toEqual(['Has work', 'Has work'])
+    })
+
+    /** Holds back every push log until `release()`, as a slow network would. */
+    function holdPushLogs() {
+      let release = () => {}
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const answer = fake.fetch.getMockImplementation() as typeof fetch
+      fake.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+        if (String(input).includes('/api/v1/activity')) await held
+        return answer(input)
+      })
+      return () => release()
+    }
+
+    it('says how far the reading is, and keeps Refresh and Download still until the file is written', async () => {
+      const release = holdPushLogs()
+      await openRegister()
+      fireEvent.click(screen.getByRole('button', { name: 'Download .xlsx' }))
+
+      // Three repos have a link: two with work, and the one that was not found.
+      expect(await screen.findByText(/^Reading first pushes for the file: \d of 3 repos$/)).toBeTruthy()
+      expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(true)
+      expect((screen.getByRole('button', { name: 'Download .xlsx' }) as HTMLButtonElement).disabled).toBe(true)
+      expect(saved).toHaveLength(0)
+
+      release()
+      await waitFor(() => expect(saved).toHaveLength(1))
+      expect(await screen.findByText(`Checked ${formatDateTime(FETCHED_AT)}`)).toBeTruthy()
+      expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(false)
+      expect((screen.getByRole('button', { name: 'Download .xlsx' }) as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    it('writes no file when the sheet is removed while the first pushes are read', async () => {
+      const release = holdPushLogs()
+      const { store } = await openRegister()
+      fireEvent.click(screen.getByRole('button', { name: 'Download .xlsx' }))
+      await screen.findByText(/^Reading first pushes for the file/)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Yes, remove' }))
+      expect(store.getState().sheet).toBeNull()
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(saved).toHaveLength(0)
+      expect(screen.queryByRole('alert')).toBeNull()
+    })
+
     it('says so when the file cannot be written', async () => {
       useSaver(() => {
         throw new Error('disk full')
@@ -260,6 +373,7 @@ describe('the register with a deadline', () => {
   /** An instant whole minutes after the deadline (or before, when negative). */
   const at = (minutes: number) => new Date(DEADLINE + 1 + minutes * 60_000).toISOString()
   const IN_TIME = oid('in time')
+  let fake: ReturnType<typeof stubApi>
 
   beforeEach(() => {
     saveSheet(
@@ -270,7 +384,7 @@ describe('the register with a deadline', () => {
       ],
       { deadlineInput: INPUT },
     )
-    stubApi({
+    fake = stubApi({
       repos: {
         'octocat/hello-world': okRepo('octocat/hello-world', { pushedAt: at(-600) }),
         'octocat/spoon-knife': okRepo('octocat/spoon-knife', { pushedAt: at(540) }),
@@ -303,5 +417,105 @@ describe('the register with a deadline', () => {
 
     expect(chip(/Late$/).textContent).toBe('1 Late')
     expect(chip(/On time/).textContent).toBe('1 On time')
+  })
+
+  describe('downloading', () => {
+    /** Files the page handed to the browser, instead of saving them. */
+    let saved: Array<{ bytes: Uint8Array; name: string }>
+    beforeEach(() => {
+      saved = []
+      vi.doMock('../sheet/xlsxStyle.ts', async (original) => ({
+        ...(await original<typeof import('../sheet/xlsxStyle.ts')>()),
+        saveFile: (bytes: Uint8Array, name: string) => saved.push({ bytes, name }),
+      }))
+      // Rahim's repo is older than GitHub's push log: it has only its commits.
+      const OLDEST = at(-700)
+      fake.api.commits['octocat/hello-world'] = [
+        { oid: oid('rahim'), committedAt: OLDEST, authoredAt: OLDEST, headline: 'First page', parents: [], authorName: 'Rahim', authorLogin: 'rahim' },
+      ]
+    })
+    afterEach(() => vi.doUnmock('../sheet/xlsxStyle.ts'))
+
+    const download = async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Download .xlsx' }))
+      await waitFor(() => expect(saved).toHaveLength(1))
+      const book = XLSX.read(saved[0].bytes, { type: 'array' })
+      const grid = (name: string) => XLSX.utils.sheet_to_json<unknown[]>(book.Sheets[name], { header: 1, defval: '', raw: false })
+      return { book, grid }
+    }
+
+    it('writes status, lateness and the created, first and last push dates of every row, with no notes', async () => {
+      await openRegister()
+      await within(screen.getByRole('table')).findByText('3h 19m')
+      const { grid } = await download()
+
+      // As on screen: the newest push first.
+      const [header, ...rows] = grid('Results')
+      expect(header.slice(0, 9)).toEqual(['Row', 'ID', 'Name', 'Repo', 'Status', 'Late by', 'Repo created', 'First push', 'Last push'])
+      expect(rows.map((line) => line.slice(2, 9))).toEqual([
+        ['Nusrat Jahan', 'octocat/spoon-knife', 'Changed after deadline', formatDuration(9 * 3_600_000), formatDateTime('2026-09-01T08:00:00Z'), formatDateTime(at(-1440)), formatDateTime(at(540))],
+        ['Salma Akter', 'salma/late-start', 'Late', '3h 19m', formatDateTime(at(120)), formatDateTime(at(199)), formatDateTime(at(199))],
+        ['Rahim Uddin', 'octocat/hello-world', 'On time', '', formatDateTime('2026-09-01T08:00:00Z'), `${formatDateTime(at(-700))} (commit date)`, formatDateTime(at(-600))],
+      ])
+      for (const name of ['Results', 'Needs attention']) expect(grid(name)[0], name).not.toContain('Notes')
+
+      // Late in minutes and the last push in time, for the two who were not on time.
+      expect(rows.map((line) => [line[11], line[12]])).toEqual([
+        ['540', formatDateTime(at(-1440))],
+        ['199', ''],
+        ['', ''],
+      ])
+    })
+
+    it('lists who needs attention, the most urgent first, in seven columns', async () => {
+      await openRegister()
+      await within(screen.getByRole('table')).findByText('3h 19m')
+      const { grid } = await download()
+
+      const [header, ...rows] = grid('Needs attention')
+      expect(header).toEqual(['Row', 'ID', 'Name', 'Repo', 'Status', 'Late by', 'What to do'])
+      expect(rows.map((line) => [line[2], line[4]])).toEqual([
+        ['Salma Akter', 'Late'],
+        ['Nusrat Jahan', 'Changed after deadline'],
+      ])
+      expect(rows[0]).toHaveLength(7)
+    })
+
+    it('reads no push log twice: the two the register read are used as they are', async () => {
+      await openRegister()
+      await within(screen.getByRole('table')).findByText('3h 19m')
+      const logs = () => fake.paths().filter((path) => path === '/api/v1/activity').length
+      expect(logs()).toBe(2)
+
+      await download()
+      // Only the on-time repo was still unread.
+      expect(logs()).toBe(3)
+      expect(fake.paths().filter((path) => path === '/api/v1/commits')).toHaveLength(1)
+    })
+
+    it('shows in the file the same first push as on each person\'s own page', async () => {
+      stubIntersectionObserver()
+      vi.stubGlobal('scrollTo', vi.fn())
+      const { view } = await openRegister()
+      await within(screen.getByRole('table')).findByText('3h 19m')
+      const { grid } = await download()
+      const inFile = new Map(grid('Results').slice(1).map((line) => [line[2] as string, line[7] as string]))
+      view.unmount()
+
+      const { PersonView } = await import('./PersonView.tsx')
+      const firstPushOnPage = async (rowId: string) => {
+        const page = render(<PersonView rowId={rowId} />)
+        const term = await screen.findByText('First push')
+        await waitFor(() => expect(term.nextElementSibling?.textContent).not.toBe('…'))
+        const value = term.nextElementSibling?.textContent ?? ''
+        const byCommit = screen.queryByText('Date of the first commit. The push time is not known.') !== null
+        page.unmount()
+        return byCommit ? `${value} (commit date)` : value
+      }
+      expect(inFile.get('Rahim Uddin')).toBe(await firstPushOnPage('r2'))
+      expect(inFile.get('Nusrat Jahan')).toBe(await firstPushOnPage('r3'))
+      expect(inFile.get('Salma Akter')).toBe(await firstPushOnPage('r4'))
+      expect([...inFile.values()].every((text) => /^\d\d \w{3} \d{4}, \d\d:\d\d/.test(text))).toBe(true)
+    })
   })
 })

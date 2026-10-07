@@ -156,9 +156,17 @@ itself: the same columns in the same order, the repo by name (`octocat/Hello-Wor
 clickable) and dates written as `27 Jan 2011, 01:01`. When a filter or a search
 is on, the Summary says so ("3 of 15").
 
+The file has one date more than the register: **First push**, between **Repo
+created** and **Last push**. It is read from GitHub when the button is pressed,
+for the repos that go into the file (one request for most repos; the toolbar
+counts them), and it is the same time the person's own page shows. When GitHub
+has no push time, the date of the first commit is given and marked
+`(commit date)`. The notes that the register shows under a status are not in
+the file.
+
 | Sheet | One row per | Holds |
 |-------|-------------|-------|
-| Results | person | the register's columns (row, ID, name, repo, status, late by, repo created, last push, last commit, commits) with the notes next to the status, then late in minutes, last on-time push and branch |
+| Results | person | the register's columns (row, ID, name, repo, status, late by, repo created, last push, last commit, commits) with the first push between repo created and last push, then late in minutes, last on-time push and branch |
 | Summary | status | how many people have it and their share, who needs attention, who shares a repo, the deadline and check time |
 | Needs attention | late, changed, empty, missing or broken row | the most urgent first, with what to do about each |
 | Same repo | repo handed in by several people | their IDs, names, sheet rows and statuses |

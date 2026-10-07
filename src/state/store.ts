@@ -78,6 +78,8 @@ const SORT_COLUMNS: readonly SortColumn[] = [
 ]
 /** Pages of 100 push events. Past this the repo is flagged for a person to look at. */
 const MAX_ACTIVITY_PAGES = 5
+/** How far the person screen and the download read the push log, so that both find the same first push. */
+export const HISTORY_PAGES = 3
 
 type Saved = {
   fileName: string
@@ -187,7 +189,16 @@ function set(patch: Partial<AppState>): void {
 export const client = createClient({ concurrency: 6, onPause: (pause) => set({ pause }) })
 
 // Bookkeeping that the screen does not need to see.
-type ActivityJob = { v: string; next: string | null | undefined; pages: number; loading: boolean; probing: boolean }
+type ActivityJob = {
+  v: string
+  next: string | null | undefined
+  pages: number
+  /** The furthest page anybody asked for. A load under way reads on to it. */
+  wanted: number
+  /** The load under way, so that a second caller can wait for it. */
+  loading: Promise<void> | null
+  probing: boolean
+}
 const repoLoading = new Set<string>()
 const activityJobs = new Map<string, ActivityJob>()
 /** Bumped whenever the sheet changes, so late answers for an old sheet are dropped. */
@@ -311,7 +322,7 @@ function activityJob(key: string, meta: RepoOk): ActivityJob {
   const v = meta.pushedAt ?? meta.createdAt
   let job = activityJobs.get(key)
   if (!job || job.v !== v) {
-    job = { v, next: undefined, pages: 0, loading: false, probing: false }
+    job = { v, next: undefined, pages: 0, wanted: 0, loading: null, probing: false }
     activityJobs.set(key, job)
   }
   return job
@@ -319,16 +330,29 @@ function activityJob(key: string, meta: RepoOk): ActivityJob {
 
 /**
  * Loads the push log of the default branch, newest first, until it reaches
- * the deadline (or `minPages`, for the person screen), the end, or the limit.
+ * the deadline (or `minPages`, for the person screen and the download), the
+ * end, or the limit. The promise settles when the log has been read that far,
+ * also for a caller that arrives while it is being read.
  */
-export async function loadActivity(key: string, minPages = 1): Promise<void> {
+export function loadActivity(key: string, minPages = 1): Promise<void> {
   const meta = state.repos.get(key)
-  if (!meta || meta.state !== 'ok' || !meta.defaultBranch) return
+  if (!meta || meta.state !== 'ok' || !meta.defaultBranch) return Promise.resolve()
   const job = activityJob(key, meta)
-  if (job.loading) return
-  job.loading = true
+  job.wanted = Math.max(job.wanted, minPages)
+  if (!job.loading) {
+    const run: Promise<void> = readActivity(key, apiRepoName(meta), meta.defaultBranch, job).then((finished) => {
+      // Refresh lets go of a load under way, and another may have begun since.
+      if (job.loading === run) job.loading = null
+      if (finished) ensure()
+    })
+    job.loading = run
+  }
+  return job.loading
+}
+
+/** Answers false when the sheet or the repo changed meanwhile, and the pages read are dropped. */
+async function readActivity(key: string, repo: string, branch: string, job: ActivityJob): Promise<boolean> {
   const gen = generation
-  const repo = apiRepoName(meta)
   let events: ActivityEvent[] = state.activity.get(key)?.events ?? []
   let settled = state.activity.get(key)?.settled ?? true
 
@@ -337,13 +361,13 @@ export async function loadActivity(key: string, minPages = 1): Promise<void> {
       const deadline = state.deadline
       const reachesDeadline =
         deadline === null || events.some((event) => Date.parse(event.ts) <= deadline)
-      if (job.pages >= minPages && reachesDeadline) break
+      if (job.pages >= job.wanted && reachesDeadline) break
 
       const page = await client.get<ActivityResponse>(
-        activityUrl({ repo, v: job.v, ref: meta.defaultBranch, after: job.next ?? undefined }),
+        activityUrl({ repo, v: job.v, ref: branch, after: job.next ?? undefined }),
         1,
       )
-      if (gen !== generation || activityJobs.get(key) !== job) return
+      if (gen !== generation || activityJobs.get(key) !== job) return false
       events = [...events, ...page.events]
       settled = page.settled
       job.next = page.next
@@ -357,12 +381,10 @@ export async function loadActivity(key: string, minPages = 1): Promise<void> {
       failed: false,
     })
   } catch {
-    if (gen !== generation || activityJobs.get(key) !== job) return
+    if (gen !== generation || activityJobs.get(key) !== job) return false
     putActivity(key, { events, failed: true })
-  } finally {
-    job.loading = false
   }
-  ensure()
+  return true
 }
 
 /** Loads the oldest events on any branch: "was anything on GitHub by the deadline?" */
@@ -475,7 +497,7 @@ export function refresh(): void {
     }
   }
   for (const job of activityJobs.values()) {
-    job.loading = false
+    job.loading = null
     job.probing = false
   }
   set({ activity, checkedAt: null })
@@ -555,6 +577,19 @@ export function judgeRows(
       }),
     }
   })
+}
+
+/** The same rows as they are now, for code that has waited for something to load. */
+export function currentPeople(): PersonRow[] {
+  const { sheet, repos, activity, deadline } = state
+  return sheet ? judgeRows(sheet, repos, activity, deadline) : []
+}
+
+/** One repo as it is now, whoever handed it in. */
+export function repoFacts(key: string): Pick<PersonRow, 'meta' | 'activity' | 'verdict'> {
+  const meta = state.repos.get(key)
+  const activity = state.activity.get(key)
+  return { meta, activity, verdict: judge({ link: linkFor(key), meta, activity, deadline: state.deadline }) }
 }
 
 /** Called once when the page starts. */

@@ -5,6 +5,7 @@ import type { RepoOk } from '../../shared/api.ts'
 import { LINK_PROBLEM_TEXT } from '../sheet/parseRepoLink.ts'
 import type { ExportRow } from '../sheet/exportXlsx.ts'
 import type { PersonRow, Sort } from '../state/store.ts'
+import { firstPush, type FirstPush } from './firstPush.ts'
 import { apiRepoName } from './repoName.ts'
 import { formatDuration } from './time.ts'
 import { NOTE_TEXT, type Status, type Verdict } from './verdict.ts'
@@ -159,7 +160,15 @@ export function repoLinkFor(person: PersonRow): string {
   return person.row.link.ok ? repoUrl(person.row.link.key) : ''
 }
 
-export function toExportRows(people: readonly PersonRow[], deadlinePassed: boolean): ExportRow[] {
+/**
+ * @param firstPushes by repo, read for the download. A repo that is missing
+ *   gets what the register itself knows, which is the first push of a late row.
+ */
+export function toExportRows(
+  people: readonly PersonRow[],
+  deadlinePassed: boolean,
+  firstPushes: ReadonlyMap<string, FirstPush> = new Map(),
+): ExportRow[] {
   return people.map((person) => {
     const meta = okMeta(person)
     const { verdict, row } = person
@@ -176,8 +185,8 @@ export function toExportRows(people: readonly PersonRow[], deadlinePassed: boole
       needsReview: verdict.needsReview,
       lateBy: latenessText(verdict),
       lateMinutes: verdict.lateByMs === null ? null : Math.floor(verdict.lateByMs / 60_000),
-      notes: noteTexts(person).join('; '),
       repoCreatedAt: meta?.createdAt ?? null,
+      firstPush: (row.link.ok ? firstPushes.get(row.link.key) : undefined) ?? firstPush(person, undefined),
       lastPushAt: hasWork ? (meta.pushedAt ?? null) : null,
       lastOnTimePushAt: verdict.lastOnTimePushAt,
       lastCommitAt: meta?.headCommittedAt ?? null,

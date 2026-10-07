@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { CommitInfo, RepoMeta, RepoOk } from '../../shared/api.ts'
+import { ZERO_OID } from '../../shared/validate.ts'
 import { parseRepoLink } from '../sheet/parseRepoLink.ts'
 import type { SheetRow } from '../sheet/columns.ts'
 import { judgeRows, type PersonRow, type Sheet } from '../state/store.ts'
+import type { FirstPush } from './firstPush.ts'
 import {
   countByStatus,
   filterPeople,
@@ -171,6 +173,33 @@ describe('labels and links', () => {
     expect(rows[3]).toMatchObject({ commits: null, lastPushAt: null })
     // A bad link is exported as it was typed.
     expect(rows[4]).toMatchObject({ repoName: 'not a link at all', repoUrl: null })
+  })
+
+  it('gives each export row the first push read for its repo', () => {
+    const read = new Map<string, FirstPush>([
+      ['rahim/task', { kind: 'recorded', at: '2026-10-02T03:00:00Z' }],
+      ['salma/task', { kind: 'none' }],
+    ])
+    const rows = toExportRows(people, true, read)
+    // Rahim and Zahid handed in the same repo.
+    expect(rows[0].firstPush).toEqual({ kind: 'recorded', at: '2026-10-02T03:00:00Z' })
+    expect(rows[5].firstPush).toEqual(rows[0].firstPush)
+    // No work, no repo, no link: no first push.
+    expect(rows.slice(2, 5).map((item) => item.firstPush.kind)).toEqual(['none', 'none', 'none'])
+  })
+
+  it('falls back on what the register knows: a late row names its own first push', () => {
+    const FIRST = '2026-10-05T21:00:00Z'
+    const log = {
+      events: [{ ts: FIRST, type: 'branch_creation', ref: 'refs/heads/main', before: ZERO_OID, after: 'a'.repeat(40), actor: 'karim' }],
+      exhausted: true,
+      capped: false,
+      settled: true,
+      probe: null,
+      failed: false,
+    }
+    const judged = judgeRows(sheet, repos, new Map([['karim/task', log]]), DEADLINE)
+    expect(toExportRows(judged, true)[1]).toMatchObject({ status: 'Late', firstPush: { kind: 'recorded', at: FIRST } })
   })
 })
 

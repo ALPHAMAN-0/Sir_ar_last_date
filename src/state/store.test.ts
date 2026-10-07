@@ -404,6 +404,87 @@ describe('the deadline', () => {
     expect(log?.probe).toHaveLength(1)
   })
 
+  it('lets a second caller wait for the log being read, which then reads on as far as that caller asked', async () => {
+    api.github.set('b/late', repo('b/late', { pushedAt: AFTER }))
+    let page = 0
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    api.handlers['/api/v1/activity'] = async () => {
+      const n = ++page
+      if (n === 1) await held
+      // Every page reaches the deadline, so the register alone would stop after the first.
+      return json({
+        fetchedAt: AFTER,
+        settled: true,
+        events: [push(AFTER, OID(n)), push(BEFORE, OID(n + 10))],
+        next: `page-${n + 1}`,
+      } satisfies ActivityResponse)
+    }
+    saveSheet(['github.com/b/late'], { deadlineInput: DEADLINE_INPUT })
+
+    const store = await freshStore()
+    store.start()
+    await settle()
+    expect(api.callsTo('activity')).toHaveLength(1)
+
+    let done = false
+    const reading = store.loadActivity('b/late', 3).then(() => {
+      done = true
+    })
+    await settle()
+    expect(done).toBe(false)
+    expect(api.callsTo('activity')).toHaveLength(1)
+
+    release()
+    await reading
+    expect(api.callsTo('activity')).toHaveLength(3)
+    expect(store.getState().activity.get('b/late')?.events).toHaveLength(6)
+  })
+
+  it('reads on from where it stopped when a later caller asks for more pages', async () => {
+    api.github.set('b/late', repo('b/late', { pushedAt: AFTER }))
+    let page = 0
+    api.handlers['/api/v1/activity'] = () => {
+      const n = ++page
+      return json({
+        fetchedAt: AFTER,
+        settled: true,
+        events: [push(AFTER, OID(n)), push(BEFORE, OID(n + 10))],
+        next: n < 2 ? `page-${n + 1}` : null,
+      } satisfies ActivityResponse)
+    }
+    saveSheet(['github.com/b/late'], { deadlineInput: DEADLINE_INPUT })
+
+    const store = await freshStore()
+    store.start()
+    await settle()
+    expect(api.callsTo('activity')).toHaveLength(1)
+
+    await store.loadActivity('b/late', store.HISTORY_PAGES)
+    const asked = api.callsTo('activity')
+    expect(asked.map((url) => url.searchParams.get('after'))).toEqual([null, 'page-2'])
+    expect(store.getState().activity.get('b/late')).toMatchObject({ exhausted: true, capped: false, failed: false })
+    expect(store.getState().activity.get('b/late')?.events).toHaveLength(4)
+
+    // The log is at its end. Asking again costs nothing.
+    await store.loadActivity('b/late', store.HISTORY_PAGES)
+    expect(api.callsTo('activity')).toHaveLength(2)
+  })
+
+  it('has no push log to wait for when the repo is empty, missing or not in the sheet', async () => {
+    api.github.set('a/empty', repo('a/empty', { isEmpty: true, headOid: null, defaultBranch: null }))
+    saveSheet(['github.com/a/empty', 'github.com/a/missing'])
+
+    const store = await freshStore()
+    store.start()
+    await settle()
+    await Promise.all([store.loadActivity('a/empty', 3), store.loadActivity('a/missing', 3), store.loadActivity('no/such', 3)])
+    expect(api.callsTo('activity')).toHaveLength(0)
+    expect(store.getState().activity.size).toBe(0)
+  })
+
   it('shows a failed push log as a failed check, not as the student being late', async () => {
     api.github.set('b/late', repo('b/late', { pushedAt: AFTER }))
     api.handlers['/api/v1/activity'] = () => apiError(404, 'not_found')
@@ -444,6 +525,38 @@ describe('refresh', () => {
     expect(store.getState().activity.get('b/late')).toMatchObject({ failed: false, exhausted: true })
   })
 
+  it('lets go of a push log that is being read, and reads it once more without doubling it', async () => {
+    api.github.set('b/late', repo('b/late', { pushedAt: AFTER }))
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    api.handlers['/api/v1/activity'] = async () => {
+      await held
+      return json({ fetchedAt: AFTER, settled: true, events: [push(AFTER, OID(9)), push(BEFORE, OID(5))], next: null })
+    }
+    saveSheet(['github.com/b/late'], { deadlineInput: DEADLINE_INPUT })
+
+    const store = await freshStore()
+    store.start()
+    await settle()
+    expect(store.getState().activity.has('b/late')).toBe(false)
+
+    store.refresh()
+    await settle()
+    release()
+    await settle()
+
+    const log = store.getState().activity.get('b/late')
+    expect(log).toMatchObject({ exhausted: true, failed: false })
+    expect(log?.events).toHaveLength(2)
+    expect(store.currentPeople()[0].verdict.status).toBe('changed_after')
+    // The log is whole and nobody is reading it: a later caller is answered at once.
+    const before = api.callsTo('activity').length
+    await store.loadActivity('b/late', 3)
+    expect(api.callsTo('activity')).toHaveLength(before)
+  })
+
   it('forgets the push log when the repo was pushed again', async () => {
     api.github.set('b/late', repo('b/late', { pushedAt: AFTER }))
     api.handlers['/api/v1/activity'] = (url) =>
@@ -465,6 +578,42 @@ describe('refresh', () => {
 
     expect(api.callsTo('activity').map((url) => url.searchParams.get('v'))).toEqual([AFTER, LATER])
     expect(store.getState().activity.get('b/late')?.events[0].ts).toBe(LATER)
+  })
+})
+
+describe('the rows and repos as they are now', () => {
+  it('judges the rows without a hook, the same way the screen does', async () => {
+    api.github.set('a/early', repo('a/early', { pushedAt: BEFORE }))
+    api.github.set('b/late', repo('b/late', { pushedAt: AFTER }))
+    api.handlers['/api/v1/activity'] = () =>
+      json({ fetchedAt: AFTER, settled: true, events: [push(AFTER, OID(9)), push(BEFORE, OID(5))], next: null })
+    saveSheet(['github.com/a/early', 'github.com/b/late', 'no link'], { deadlineInput: DEADLINE_INPUT })
+
+    const store = await freshStore()
+    expect(store.currentPeople()).toEqual([])
+    store.start()
+    await settle()
+
+    const state = store.getState()
+    expect(store.currentPeople()).toEqual(store.judgeRows(state.sheet!, state.repos, state.activity, state.deadline))
+    expect(store.currentPeople().map((person) => person.verdict.status)).toEqual(['on_time', 'changed_after', 'invalid_link'])
+  })
+
+  it('gives the facts of one repo, and nothing but "checking" for one it has not heard of', async () => {
+    api.github.set('b/late', repo('b/late', { pushedAt: AFTER }))
+    api.handlers['/api/v1/activity'] = () =>
+      json({ fetchedAt: AFTER, settled: true, events: [push(AFTER, OID(9)), push(BEFORE, OID(5))], next: null })
+    saveSheet(['github.com/b/late'], { deadlineInput: DEADLINE_INPUT })
+
+    const store = await freshStore()
+    store.start()
+    await settle()
+
+    const facts = store.repoFacts('b/late')
+    expect(facts.meta).toMatchObject({ key: 'b/late', state: 'ok' })
+    expect(facts.activity?.events).toHaveLength(2)
+    expect(facts.verdict.status).toBe('changed_after')
+    expect(store.repoFacts('no/such')).toMatchObject({ meta: undefined, activity: undefined, verdict: { status: 'checking' } })
   })
 })
 

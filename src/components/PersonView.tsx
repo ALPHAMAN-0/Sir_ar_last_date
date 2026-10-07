@@ -14,7 +14,7 @@ import { formatDateTime, formatDuration } from '../logic/time.ts'
 import { LINK_PROBLEM_TEXT } from '../sheet/parseRepoLink.ts'
 import { personHref, useApp, useNow, usePeople } from '../state/hooks.ts'
 import { loadCommits, type CommitList } from '../state/person.ts'
-import { loadActivity, type PersonRow } from '../state/store.ts'
+import { HISTORY_PAGES, loadActivity, type PersonRow } from '../state/store.ts'
 import { Stamp } from './Stamp.tsx'
 import { Timeline } from './Timeline.tsx'
 
@@ -112,7 +112,7 @@ export function PersonView({ rowId }: { rowId: string }) {
 
   // The push log gives every commit its real arrival time.
   useEffect(() => {
-    if (key && headOid) void loadActivity(key, 3)
+    if (key && headOid) void loadActivity(key, HISTORY_PAGES)
   }, [key, headOid, pushedAt])
 
   // Previous and next follow the order and filter chosen in the register.

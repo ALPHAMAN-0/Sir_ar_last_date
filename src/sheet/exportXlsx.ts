@@ -1,13 +1,14 @@
 // The register's download: a results report as an Excel workbook. Loaded only
 // when the Download button is pressed, because the Excel library is large.
 //
-//   Results          the register as it is on screen: same columns, same order, one row per person
+//   Results          the register as it is on screen, one row per person, with each repo's first push
 //   Summary          how many people have each status, at a glance
 //   Needs attention  late, changed, empty, missing and broken rows, with what to do
 //   Same repo        repos that more than one person handed in
 //   Info             when and how the file was made, and what each status means
 
 import * as XLSX from 'xlsx'
+import { firstPushText, type FirstPush } from '../logic/firstPush.ts'
 import { STATUS_TONE } from '../logic/people.ts'
 import type { Status } from '../logic/verdict.ts'
 import { headerCells, saveFile, writeStyledXlsx, type Paint, type SheetStyle } from './xlsxStyle.ts'
@@ -27,8 +28,8 @@ export type ExportRow = {
   needsReview: boolean
   lateBy: string
   lateMinutes: number | null
-  notes: string
   repoCreatedAt: string | null
+  firstPush: FirstPush
   lastPushAt: string | null
   lastOnTimePushAt: string | null
   lastCommitAt: string | null
@@ -53,6 +54,8 @@ export type ResultsReport = { book: XLSX.WorkBook; styles: SheetStyle[] }
 
 /** "27 Jan 2011, 01:01": how the page writes a date. */
 const DATE_FORMAT = 'dd mmm yyyy, hh:mm'
+/** For a date that is not a push time. The cell says so, and still sorts and filters as a date. */
+const COMMIT_DATE_FORMAT = `${DATE_FORMAT}" (commit date)"`
 const MS_PER_DAY = 86_400_000
 /** Days between Excel's day zero (30 Dec 1899) and 1 Jan 1970. */
 const EXCEL_EPOCH_OFFSET = 25_569
@@ -71,12 +74,34 @@ const repo = (row: ExportRow): XLSX.CellObject =>
  * A real Excel date (so it sorts and filters as a date) showing the same local
  * wall-clock time the page shows. Excel dates carry no time zone.
  */
-export function excelDate(instant: string | number | null): XLSX.CellObject {
+export function excelDate(instant: string | number | null, format = DATE_FORMAT): XLSX.CellObject {
   if (instant === null) return text('')
   const date = new Date(instant)
   if (Number.isNaN(date.getTime())) return text('')
   const localMs = date.getTime() - date.getTimezoneOffset() * 60_000
-  return { t: 'n', v: localMs / MS_PER_DAY + EXCEL_EPOCH_OFFSET, z: DATE_FORMAT }
+  return { t: 'n', v: localMs / MS_PER_DAY + EXCEL_EPOCH_OFFSET, z: format }
+}
+
+/**
+ * The time GitHub received the first push. When GitHub has none, the date of
+ * the first commit, marked as one. A time that is not known is said in words.
+ * Only a repo without work has a blank cell.
+ */
+function firstPushCell({ firstPush }: ExportRow): XLSX.CellObject {
+  switch (firstPush.kind) {
+    case 'recorded':
+      return excelDate(firstPush.at)
+    case 'commit_date':
+      return excelDate(firstPush.at, COMMIT_DATE_FORMAT)
+    case 'failed':
+    case 'unknown':
+      return text(firstPushText(firstPush))
+    case 'loading':
+      // The file is finished, so a time still on its way was never read.
+      return text(firstPushText({ kind: 'failed' }))
+    case 'none':
+      return text('')
+  }
 }
 
 /** The deadline is stored as the last millisecond of its minute; Excel would round that up. */
@@ -122,17 +147,18 @@ function table<Row>(
 }
 
 // The register's own columns in the register's own order, so the file reads like
-// the screen. On screen the notes sit under the status; here they get the column
-// next to it, so the Status filter still lists each status once.
+// the screen. The first push is added between the two dates it lies between; on
+// screen it is on the person's own page. The notes under a status stay on screen.
 const RESULT_COLUMNS: ReadonlyArray<Column<ExportRow>> = [
   { title: 'Row', width: 6, cell: (row) => number(row.rowNumber) },
   { title: 'ID', width: 16, cell: (row) => text(row.id) },
   { title: 'Name', width: 26, cell: (row) => text(row.name) },
   { title: 'Repo', width: 34, cell: repo },
   { title: 'Status', width: 24, cell: (row) => text(row.status) },
-  { title: 'Notes', width: 44, cell: (row) => text(row.notes) },
   { title: 'Late by', width: 12, cell: (row) => text(row.lateBy) },
   { title: 'Repo created', width: 21, cell: (row) => excelDate(row.repoCreatedAt) },
+  // Wide enough for a marked commit date: Excel shows a date that does not fit as "####".
+  { title: 'First push', width: 33, cell: firstPushCell },
   { title: 'Last push', width: 21, cell: (row) => excelDate(row.lastPushAt) },
   { title: 'Last commit', width: 21, cell: (row) => excelDate(row.lastCommitAt) },
   { title: 'Commits', width: 10, cell: (row) => number(row.commits) },
@@ -171,7 +197,7 @@ export function whatToDo(row: ExportRow): string {
     case 'checking':
       return 'Still being checked when this file was made. Download again in a moment.'
     default:
-      return row.needsReview ? 'Worth a look yourself: see the notes.' : ''
+      return row.needsReview ? 'Worth a look yourself. Open this person on the page to see why.' : ''
   }
 }
 
@@ -183,7 +209,6 @@ const ATTENTION_COLUMNS: ReadonlyArray<Column<ExportRow>> = [
   { title: 'Status', width: 24, cell: (row) => text(row.status) },
   { title: 'Late by', width: 12, cell: (row) => text(row.lateBy) },
   { title: 'What to do', width: 70, cell: (row) => text(whatToDo(row)) },
-  { title: 'Notes', width: 44, cell: (row) => text(row.notes) },
 ]
 
 export function needsAttention(rows: readonly ExportRow[]): ExportRow[] {
@@ -354,6 +379,12 @@ function infoSheet(info: ExportInfo): XLSX.WorkSheet {
     ['Checked at', excelDate(info.checkedAt)],
     ['Time zone of all dates', text(info.zone)],
     ['How lateness is judged', text('By the time GitHub received the push on the main branch, not by commit dates.')],
+    [
+      'First push',
+      text(
+        'When GitHub first received work in the repo; for a fork, the first push from its owner. GitHub has kept push times only since March 2023. For older work the date of the first commit is given, marked "(commit date)".',
+      ),
+    ],
     ...MEANING.map(([label, meaning]): [string, XLSX.CellObject] => [`Status: ${label}`, text(meaning)]),
   ]
   const sheet: XLSX.WorkSheet = {}

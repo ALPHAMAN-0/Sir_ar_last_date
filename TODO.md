@@ -36,6 +36,9 @@ rewrite (deployed 2026-10-06, version 4f73fa07).
       commit; a repo is named only when that is clear, otherwise "Cannot tell". New
       column, evidence in the opened pair, and a seventh sheet in the report (see README).
       Checked in a headless browser with a faked API and with this repo's real push log.
+- [x] Results report (2026-10-07): the Notes columns are gone, and a First push date
+      stands between Repo created and Last push. It is read when Download is pressed,
+      the same way the person screen reads it (see README, "The results report").
 
 ## Not done
 - [ ] Run "who had it first" once on the local Worker with a real token. Everything
