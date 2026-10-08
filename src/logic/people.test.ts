@@ -205,6 +205,24 @@ describe('labels and links', () => {
     expect(rows[1].commitShares).toEqual({ kind: 'failed' })
   })
 
+  it('gives each export row the branches that came with its repo, and leaves them blank when not said', () => {
+    const branches = { total: 2, names: ['dev', 'main'] }
+    const withBranches = new Map(repos)
+    withBranches.set('rahim/task', repo('rahim/task', { branches }))
+    withBranches.set(
+      'salma/task',
+      repo('salma/task', { isEmpty: true, headOid: null, defaultBranch: null, branches: { total: 0, names: [] } }),
+    )
+    const rows = toExportRows(judgeRows(sheet, withBranches, new Map(), DEADLINE), true)
+    // Rahim and Zahid handed in the same repo.
+    expect(rows[0].branches).toEqual(branches)
+    expect(rows[5].branches).toEqual(branches)
+    // An older answer that did not say.
+    expect(rows[1].branches).toBeNull()
+    // No work, no repo, no link: no branches worth reporting.
+    expect(rows.slice(2, 5).map((item) => item.branches)).toEqual([null, null, null])
+  })
+
   it('falls back on what the register knows: a late row names its own first push', () => {
     const FIRST = '2026-10-05T21:00:00Z'
     const log = {

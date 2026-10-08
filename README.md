@@ -194,13 +194,20 @@ GitHub's hourly limit cuts short can be started again later: what was already
 read costs nothing for a week. A commit whose changes GitHub sends no text for
 (a picture, a very large file) is "not checked", never padding.
 
+Two more columns stand at the end: **Branches**, how many branches the repo has
+on GitHub, as a number for sorting, and **Branch names**, the names themselves,
+the main branch first and the rest A to Z (`main; dev; feature-login`). They come
+with the repo facts the register reads anyway, so the download asks GitHub
+nothing more for them. The first 100 names are listed and the cell says when a
+repo has more. Both are blank for a repo without work.
+
 | Sheet | One row per | Holds |
 |-------|-------------|-------|
-| Results | person | the register's columns (row, ID, name, repo, status, late by, repo created, last push, last commit, commits) with the first push between repo created and last push, then late in minutes, last on-time push, branch, commits by person and padding commits |
+| Results | person | the register's columns (row, ID, name, repo, status, late by, repo created, last push, last commit, commits) with the first push between repo created and last push, then late in minutes, last on-time push, branch, commits by person, padding commits, branches and branch names |
 | Summary | status | how many people have it and their share, who needs attention, who shares a repo, the deadline and check time |
 | Needs attention | late, changed, empty, missing or broken row | the most urgent first, with what to do about each |
 | Same repo | repo handed in by several people | their IDs, names, sheet rows and statuses |
-| Info | | how lateness is judged, what the first push, commits by person and padding commits columns hold, and what each status means |
+| Info | | how lateness is judged, what the first push, commits by person, padding commits and branches columns hold, and what each status means |
 
 On the Results and Needs attention sheets a person's whole row has the colour of
 their status: green on time, yellow changed after the deadline, red late or
@@ -502,7 +509,7 @@ of each query (`shared/api.ts` builds and checks it on both sides).
 
 | Route | Query | Asks GitHub for | Visitor limit | Cached |
 |-------|-------|-----------------|---------------|--------|
-| `/repos` | `r=owner/name`, up to 20, sorted | facts of up to 20 repos in one GraphQL query, including the repo a fork or a template copy comes from | 40 / min | 60 s |
+| `/repos` | `r=owner/name`, up to 20, sorted | facts of up to 20 repos in one GraphQL query, including the repo a fork or a template copy comes from, and the branches (how many, and the first 100 names) | 40 / min | 60 s |
 | `/activity` | `repo`, `v`, optional `ref`, `dir`, `after` | the push log | 240 / min | a day once settled |
 | `/commits` | `repo`, `ref`, optional `after` | 100 commits behind a head commit | 40 / min | a week |
 | `/commit` | `repo`, `sha`, optional `page` | the files one commit changed | 240 / min | a week |
@@ -548,7 +555,7 @@ React, TypeScript and Vite, with the Cloudflare Vite plugin. The Excel library
 
 Every rule that decides something is a pure function with unit tests next to it
 (`*.test.ts`), and every screen has tests that click through it in a simulated
-browser (`*.test.tsx`, jsdom and Testing Library): 605 tests in 43 files. The
+browser (`*.test.tsx`, jsdom and Testing Library): 613 tests in 44 files. The
 tests replace `fetch` with a fake API (`src/test/fakeApi.ts` for the page), so
 they never call GitHub.
 

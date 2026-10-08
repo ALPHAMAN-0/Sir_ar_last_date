@@ -56,6 +56,7 @@ const repoNode = (nameWithOwner: string) => ({
     name: 'main',
     target: { oid: SHA, committedDate: '2026-09-25T09:05:04Z', history: { totalCount: 38 } },
   },
+  refs: { totalCount: 2, nodes: [{ name: 'dev' }, { name: 'main' }] },
 })
 
 beforeEach(() => resetGitHubState())
@@ -136,6 +137,7 @@ describe('/repos', () => {
         totalCommits: 38,
         parent: null,
         template: null,
+        branches: { total: 2, names: ['dev', 'main'] },
       },
     ])
 
@@ -167,6 +169,28 @@ describe('/repos', () => {
     const sent = JSON.parse(String(githubCalls(calls)[0].init.body))
     expect(sent.query).toContain('parent { nameWithOwner }')
     expect(sent.query).toContain('templateRepository { nameWithOwner }')
+  })
+
+  it('lists the branches: how many, and the first 100 names', async () => {
+    const many = Array.from({ length: 100 }, (_, i) => ({ name: `b${i}` }))
+    const calls = stubFetch(() =>
+      Response.json({
+        data: {
+          r0: repoNode('a/few'),
+          r1: { ...repoNode('a/many'), refs: { totalCount: 150, nodes: many } },
+          // An answer that left the branches out.
+          r2: { ...repoNode('a/none'), refs: undefined },
+        },
+      }),
+    )
+    const { body } = await get(reposUrl(['a/few', 'a/many', 'a/none']))
+    expect(body.repos[0].branches).toEqual({ total: 2, names: ['dev', 'main'] })
+    expect(body.repos[1].branches.total).toBe(150)
+    expect(body.repos[1].branches.names).toHaveLength(100)
+    expect(body.repos[1].branches.names[99]).toBe('b99')
+    expect('branches' in body.repos[2]).toBe(false)
+    const sent = JSON.parse(String(githubCalls(calls)[0].init.body))
+    expect(sent.query).toContain('refs(refPrefix: "refs/heads/", first: 100')
   })
 
   it('maps NOT_FOUND to not_found and other failures to a retryable error', async () => {

@@ -49,6 +49,10 @@ rewrite (deployed 2026-10-06, version 4f73fa07).
       200 per repo) and the report tells real, tiny, only-whitespace and empty commits
       apart per person, with a "Padding commits" number column; the person screen tags
       each commit and sums them up per person (see README, "The results report").
+- [x] Results report (2026-10-08): **Branches** and **Branch names** columns at the end:
+      how many branches each repo has and their names, the main branch first. They come
+      with the repo facts (the `/repos` query now lists the first 100 branches), so the
+      download asks GitHub nothing more (see README, "The results report").
 
 ## Not done
 - [ ] Go online from GitHub Actions only when the tests pass (2026-10-07). The

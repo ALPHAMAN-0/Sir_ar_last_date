@@ -1,13 +1,15 @@
 // The register's download: a results report as an Excel workbook. Loaded only
 // when the Download button is pressed, because the Excel library is large.
 //
-//   Results          the register as it is on screen, one row per person, with each repo's first push and who committed
+//   Results          the register as it is on screen, one row per person, with each repo's first push, who committed and its branches
 //   Summary          how many people have each status, at a glance
 //   Needs attention  late, changed, empty, missing and broken rows, with what to do
 //   Same repo        repos that more than one person handed in
 //   Info             when and how the file was made, and what each status means
 
 import * as XLSX from 'xlsx'
+import type { RepoBranches } from '../../shared/api.ts'
+import { branchNamesText } from '../logic/branches.ts'
 import { commitSharesText, paddingCommits, type CommitShares } from '../logic/commitShares.ts'
 import { firstPushText, type FirstPush } from '../logic/firstPush.ts'
 import { STATUS_TONE } from '../logic/people.ts'
@@ -38,6 +40,8 @@ export type ExportRow = {
   branch: string
   /** Who committed on the main branch, read for the download like the first push. */
   commitShares: CommitShares
+  /** How many branches the repo has, and up to 100 of their names. Null when not known, or without work. */
+  branches: RepoBranches | null
 }
 
 export type ExportInfo = {
@@ -173,6 +177,9 @@ const RESULT_COLUMNS: ReadonlyArray<Column<ExportRow>> = [
   { title: 'Commits by person', width: 60, cell: (row) => text(commitSharesText(row.commitShares)) },
   // A number, so the class sorts by it. Blank until "Check commits" has looked at the repo.
   { title: 'Padding commits', width: 10, cell: (row) => number(paddingCommits(row.commitShares)) },
+  // How many branches the repo has, as a number for sorting; then their names, the main branch first.
+  { title: 'Branches', width: 10, cell: (row) => number(row.branches?.total ?? null) },
+  { title: 'Branch names', width: 50, cell: (row) => text(branchNamesText(row.branches, row.branch)) },
 ]
 
 /** Statuses that ask the teacher to do something, most urgent first. */
@@ -402,6 +409,12 @@ function infoSheet(info: ExportInfo): XLSX.WorkSheet {
       'Padding commits',
       text(
         'Only-whitespace and empty commits of everyone on the repo, as a number for sorting. Blank when the repo was not checked.',
+      ),
+    ],
+    [
+      'Branches',
+      text(
+        'How many branches the repo has on GitHub, as a number for sorting, with their names in the next column, the main branch first. The first 100 names (A to Z) are listed; the cell says when a repo has more. Blank for a repo without work.',
       ),
     ],
     ...MEANING.map(([label, meaning]): [string, XLSX.CellObject] => [`Status: ${label}`, text(meaning)]),

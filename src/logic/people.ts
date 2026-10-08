@@ -200,6 +200,7 @@ export function toExportRows(
       commits: hasWork ? meta.totalCommits : null,
       branch: meta?.defaultBranch ?? '',
       commitShares: shares,
+      branches: hasWork ? (meta.branches ?? null) : null,
     }
   })
 }

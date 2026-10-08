@@ -15,6 +15,9 @@ export const API_BASE = '/api/v1'
 export const MAX_REPOS_PER_CALL = 20
 export const MAX_FILE_PAGE = 30
 
+/** A repo's branches: how many, and the first 100 names, A to Z. */
+export type RepoBranches = { total: number; names: string[] }
+
 export type RepoOk = {
   key: string
   state: 'ok'
@@ -35,6 +38,8 @@ export type RepoOk = {
   parent?: string | null
   /** The template repo this one was generated from, if any. */
   template?: string | null
+  /** The repo's branches. Missing when an older answer did not say. */
+  branches?: RepoBranches
 }
 export type RepoMeta =
   | RepoOk

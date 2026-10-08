@@ -190,16 +190,24 @@ describe('the register', () => {
         commit('one', [], 'nusrat', '2026-09-28T10:00:00Z'),
       ]
       fake.api.commits['octocat/spoon-knife'] = [commit('only', [], 'nusrat', '2026-09-28T10:00:00Z')]
+      // Rahim also made a second branch.
+      fake.api.repos['octocat/hello-world'] = {
+        ...REPOS['octocat/hello-world'],
+        branches: { total: 2, names: ['dev', 'main'] },
+      }
       await openRegister()
       fireEvent.click(screen.getByRole('button', { name: 'Download .xlsx' }))
       await waitFor(() => expect(saved).toHaveLength(1))
 
       const results = XLSX.read(saved[0].bytes, { type: 'array' }).Sheets.Results
       const header = XLSX.utils.sheet_to_json<string[]>(results, { header: 1 })[0]
-      expect(header.slice(-2)).toEqual(['Commits by person', 'Padding commits'])
+      expect(header.slice(-4)).toEqual(['Commits by person', 'Padding commits', 'Branches', 'Branch names'])
       // On screen order: Nusrat, Rahim, then the two rows without a repo.
       expect([results.O2.v, results.O3.v]).toEqual(['nusrat 1 (100%)', 'rahim 2 (67%, 1 merge); nusrat 1 (33%)'])
       expect([results.O4?.v ?? '', results.O5?.v ?? '']).toEqual(['', ''])
+      // The branches came with the repo facts: how many, then their names, the main branch first.
+      expect([results.Q2.v, results.R2.v, results.Q3.v, results.R3.v]).toEqual([1, 'main', 2, 'main; dev'])
+      expect([results.Q4?.v ?? '', results.R5?.v ?? '']).toEqual(['', ''])
       // Each list was read once: the first pushes and who committed use the same one.
       expect(fake.paths().filter((path) => path === '/api/v1/commits')).toHaveLength(2)
     })

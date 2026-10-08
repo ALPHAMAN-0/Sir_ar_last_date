@@ -13,6 +13,8 @@ type RawRepo = {
   pushedAt: string | null
   parent?: { nameWithOwner: string } | null
   templateRepository?: { nameWithOwner: string } | null
+  /** The branches, A to Z, the first 100 of them. */
+  refs?: { totalCount: number; nodes: Array<{ name: string }> } | null
   defaultBranchRef: {
     name: string
     target: { oid?: string; committedDate?: string; history?: { totalCount: number } } | null
@@ -37,6 +39,8 @@ function toMeta(key: string, raw: RawRepo): RepoMeta {
     // GitHub hides a parent the token may not see: a fork can have none here.
     parent: raw.parent?.nameWithOwner ?? null,
     template: raw.templateRepository?.nameWithOwner ?? null,
+    // Left out, not null, when GitHub did not list the branches: the browser then shows nothing.
+    ...(raw.refs ? { branches: { total: raw.refs.totalCount, names: raw.refs.nodes.map((ref) => ref.name) } } : {}),
   }
 }
 

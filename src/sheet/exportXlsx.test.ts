@@ -39,6 +39,7 @@ const row = (over: Partial<ExportRow> = {}): ExportRow => ({
   commits: 12,
   branch: 'main',
   commitShares: { kind: 'counted', total: 12, truncated: false, authors: [{ who: 'rahim', login: 'rahim', commits: 12, merges: 0 }] },
+  branches: { total: 1, names: ['main'] },
   ...over,
 })
 
@@ -93,7 +94,7 @@ describe('the results report', () => {
   it('has the columns of the register in the register\'s order with the first push among the dates, then the extra ones', () => {
     expect(roundTrip([row()]).grid('Results')[0]).toEqual([
       'Row', 'ID', 'Name', 'Repo', 'Status', 'Late by', 'Repo created', 'First push', 'Last push', 'Last commit', 'Commits',
-      'Late (minutes)', 'Last on-time push', 'Branch', 'Commits by person', 'Padding commits',
+      'Late (minutes)', 'Last on-time push', 'Branch', 'Commits by person', 'Padding commits', 'Branches', 'Branch names',
     ])
   })
 
@@ -158,17 +159,17 @@ describe('the results report', () => {
     expect(fill(results.E7)).toBe('E6E6E6') // Invalid link
     const xml = sheetXml(bytes, 1)
     expect(xml).toContain('state="frozen"')
-    expect(xml).toContain('<autoFilter ref="A1:P9"/>')
+    expect(xml).toContain('<autoFilter ref="A1:R9"/>')
   })
 
   it('colours the whole row of a person, blank cells and dates included', () => {
     process.env.TZ = 'Asia/Dhaka'
     const { results } = roundTrip(klass)
-    expect(rowFills(results, 2, 'P')).toEqual(['D4EFDB']) // On time
-    expect(rowFills(results, 5, 'P')).toEqual(['F6CDC8']) // Late
-    expect(rowFills(results, 6, 'P')).toEqual(['FBE6B3']) // Changed after deadline
-    expect(rowFills(results, 7, 'P')).toEqual(['E6E6E6']) // Invalid link
-    expect(rowFills(results, 8, 'P')).toEqual(['E6E6E6']) // Not found
+    expect(rowFills(results, 2, 'R')).toEqual(['D4EFDB']) // On time
+    expect(rowFills(results, 5, 'R')).toEqual(['F6CDC8']) // Late
+    expect(rowFills(results, 6, 'R')).toEqual(['FBE6B3']) // Changed after deadline
+    expect(rowFills(results, 7, 'R')).toEqual(['E6E6E6']) // Invalid link
+    expect(rowFills(results, 8, 'R')).toEqual(['E6E6E6']) // Not found
     // A coloured date is still a date, and a coloured link still a link.
     expect(results.I5.w).toBe('05 Oct 2026, 21:10')
     expect(results.D5.l?.Target).toBe('https://github.com/x/A4')
@@ -180,9 +181,9 @@ describe('the results report', () => {
       row({ status: 'Has work', statusKey: 'submitted' }),
       row({ status: 'Checking', statusKey: 'checking' }),
     ])
-    expect(rowFills(results, 2, 'P')).toEqual(['F6CDC8'])
-    expect(rowFills(results, 3, 'P')).toEqual(['DCE8F7'])
-    expect(rowFills(results, 4, 'P')).toEqual([undefined])
+    expect(rowFills(results, 2, 'R')).toEqual(['F6CDC8'])
+    expect(rowFills(results, 3, 'R')).toEqual(['DCE8F7'])
+    expect(rowFills(results, 4, 'R')).toEqual([undefined])
   })
 
   it('colours whole rows on the "Needs attention" sheet too', () => {
@@ -325,6 +326,24 @@ describe('the results report', () => {
     expect(grid('Info').find((line) => line[0] === 'Padding commits')?.[1]).toContain('sorting')
   })
 
+  it('counts the branches as a number and names them after it, the main branch first', () => {
+    const { results, grid } = roundTrip([
+      row({ branches: { total: 3, names: ['dev', 'main', 'test'] } }),
+      row({ branches: null }),
+      row({ branches: { total: 150, names: Array.from({ length: 100 }, (_, i) => `b${i}`) } }),
+    ])
+    expect([results.Q1.v, results.R1.v]).toEqual(['Branches', 'Branch names'])
+    expect(results.Q2).toMatchObject({ t: 'n', v: 3 })
+    expect(results.R2).toMatchObject({ t: 's', v: 'main; dev; test' })
+    // Not known: both cells blank.
+    expect(results.Q3?.v ?? '').toBe('')
+    expect(results.R3?.v ?? '').toBe('')
+    // More branches than names listed.
+    expect(results.Q4.v).toBe(150)
+    expect(results.R4.v).toMatch(/^b0; b1; .*; b99; and 50 more$/)
+    expect(grid('Info').find((line) => line[0] === 'Branches')?.[1]).toContain('sorting')
+  })
+
   it('never writes a formula, even when a cell starts with "="', () => {
     const { results } = roundTrip([
       row({
@@ -339,14 +358,17 @@ describe('the results report', () => {
           truncated: false,
           authors: [{ who: '=HYPERLINK("https://evil.example","x")', login: null, commits: 1, merges: 0 }],
         },
+        // A branch is named by the student, and git allows this name.
+        branches: { total: 1, names: ['=HYPERLINK("https://evil.example","x")'] },
       }),
     ])
-    for (const address of ['B2', 'C2', 'D2', 'O2']) {
+    for (const address of ['B2', 'C2', 'D2', 'O2', 'R2']) {
       expect(results[address].t, address).toBe('s')
       expect(results[address].f, address).toBeUndefined()
     }
     expect(results.C2.v).toBe('=HYPERLINK("https://evil.example","click")')
     expect(results.O2.v).toBe('=HYPERLINK("https://evil.example","x") 1 (100%)')
+    expect(results.R2.v).toBe('=HYPERLINK("https://evil.example","x")')
   })
 
   it('leaves unknown values blank and writes late minutes as a number', () => {

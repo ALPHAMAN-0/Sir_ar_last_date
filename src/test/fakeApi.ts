@@ -40,6 +40,7 @@ export function okRepo(key: string, over: Partial<RepoOk> = {}): RepoOk {
     totalCommits: 5,
     parent: null,
     template: null,
+    branches: { total: 1, names: ['main'] },
     ...over,
   }
 }

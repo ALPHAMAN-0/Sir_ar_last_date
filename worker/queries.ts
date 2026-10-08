@@ -4,6 +4,7 @@ const REPO_FIELDS = `fragment RepoFields on Repository {
   nameWithOwner isEmpty isFork isArchived createdAt pushedAt
   parent { nameWithOwner } templateRepository { nameWithOwner }
   defaultBranchRef { name target { ... on Commit { oid committedDate history(first: 1) { totalCount } } } }
+  refs(refPrefix: "refs/heads/", first: 100, orderBy: {field: ALPHABETICAL, direction: ASC}) { totalCount nodes { name } }
 }`
 
 /** One aliased `repository` field per repo: r0, r1, ... with variables o0/n0, o1/n1, ... */
