@@ -1,6 +1,7 @@
 import { useRef, useState, type DragEvent } from 'react'
 import { useApp } from '../state/hooks.ts'
 import { loadFile } from '../state/store.ts'
+import { SingleCheck } from './SingleCheck.tsx'
 
 const ACCEPT = '.xlsx,.xls,.csv'
 
@@ -114,6 +115,7 @@ export function UploadPanel() {
             <strong>No account needed.</strong> You do not have to log in to GitHub.
           </li>
         </ul>
+        <SingleCheck />
       </div>
     </section>
   )

@@ -87,4 +87,27 @@ describe('UploadPanel', () => {
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
     expect(store.getState().sheet?.fileName).toBe('class-7.csv')
   })
+
+  it('shows the Single check panel on the home page', async () => {
+    await setup()
+    // The <summary> text inside the Single check <details> block.
+    expect(screen.getByText('Single check')).toBeTruthy()
+    // The repo-link input the user pastes a link into.
+    expect(screen.getByPlaceholderText(/github\.com/)).toBeTruthy()
+  })
+
+  it('runs a Single check from the home page', async () => {
+    await setup()
+    const linkInput = screen.getByPlaceholderText(/github\.com/) as HTMLInputElement
+    fireEvent.change(linkInput, { target: { value: 'rahim/task-1' } })
+    const form = screen.getByRole('button', { name: /^check$/i }).closest('form')
+    if (!form) throw new Error('expected a form around the Check button')
+    fireEvent.submit(form)
+
+    await waitFor(() => {
+      // The repo's name shows up as a link to GitHub.
+      const link = screen.getByRole('link', { name: /rahim\/task-1/ })
+      expect(link.getAttribute('href')).toBe('https://github.com/rahim/task-1')
+    })
+  })
 })
