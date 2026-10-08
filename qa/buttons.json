@@ -1,0 +1,169 @@
+{
+  "buttons": [
+    {
+      "id": "header.title",
+      "label": "Sir ar Last Date",
+      "selector": "a.masthead__title",
+      "screen": "upload",
+      "notes": "Top-left site title; always visible."
+    },
+    {
+      "id": "header.tab.register",
+      "label": "Register",
+      "selector": "a.masthead__tab[href='#/']",
+      "screen": "register",
+      "requires": { "hasSheet": true },
+      "notes": "Tab that opens the register at #/."
+    },
+    {
+      "id": "header.tab.similarity",
+      "label": "Similarity",
+      "selector": "a.masthead__tab[href='#/s']",
+      "screen": "similarity",
+      "requires": { "hasSheet": true },
+      "notes": "Tab that opens the similarity report at #/s."
+    },
+    {
+      "id": "upload.chooseFile",
+      "label": "Choose a file",
+      "selector": "button.button--primary",
+      "screen": "upload",
+      "notes": "Opens the hidden file input. We click the button itself; the input is a side effect."
+    },
+    {
+      "id": "upload.downloadSample",
+      "label": "Download a sample sheet",
+      "selector": "button.button--quiet",
+      "screen": "upload",
+      "notes": "Triggers an Excel download; we stub it away and just check no crash."
+    },
+    {
+      "id": "singleCheck.submit",
+      "label": "Check",
+      "selector": "form.single-check__form button[type='submit']",
+      "screen": "single-check",
+      "notes": "Submits a single repo URL. Stubbed API answers; we just check no crash."
+    },
+    {
+      "id": "register.replaceSheet",
+      "label": "Replace sheet",
+      "selector": "text=Replace sheet",
+      "screen": "register",
+      "requires": { "hasSheet": true, "route": "#/" }
+    },
+    {
+      "id": "register.columns",
+      "label": "Columns",
+      "selector": "text=Columns",
+      "screen": "register",
+      "requires": { "hasSheet": true, "route": "#/" },
+      "notes": "Opens the column picker; the picker itself is tested separately when triggered."
+    },
+    {
+      "id": "register.clear.open",
+      "label": "Clear",
+      "selector": "text=Clear",
+      "screen": "register",
+      "requires": { "hasSheet": true, "route": "#/" },
+      "notes": "First click — opens the confirm strip."
+    },
+    {
+      "id": "register.clear.confirm",
+      "label": "Yes, remove",
+      "selector": "text=Yes, remove",
+      "screen": "register",
+      "requires": { "hasSheet": true, "route": "#/" },
+      "preClicks": ["text=Clear"],
+      "notes": "Second click after Clear — removes the sheet."
+    },
+    {
+      "id": "register.chip.everyone",
+      "label": "Everyone",
+      "selector": "text=Everyone",
+      "screen": "register",
+      "requires": { "hasSheet": true, "route": "#/" },
+      "notes": "Status filter chip that resets the filter to 'all'."
+    },
+    {
+      "id": "register.refresh",
+      "label": "Refresh",
+      "selector": "text=Refresh",
+      "screen": "register",
+      "requires": { "hasSheet": true, "route": "#/" }
+    },
+    {
+      "id": "register.download",
+      "label": "Download .xlsx",
+      "selector": "text=Download .xlsx",
+      "screen": "register",
+      "requires": { "hasSheet": true, "route": "#/" },
+      "notes": "Reads first pushes + commits, then writes an Excel workbook; we stub the anchor click."
+    },
+    {
+      "id": "register.checkCommits",
+      "label": "Check commits",
+      "selector": "text=Check commits",
+      "screen": "register",
+      "requires": { "hasSheet": true, "route": "#/" }
+    },
+    {
+      "id": "register.sort.id",
+      "label": "sort: ID",
+      "selector": "button.sort",
+      "screen": "people-table",
+      "requires": { "hasSheet": true, "route": "#/" },
+      "notes": "Click the first sort button (Row column). The full grid of sorts is exercised by this single click via aria-sort flips."
+    },
+    {
+      "id": "deadline.set",
+      "label": "Set deadline",
+      "selector": "text=Set deadline",
+      "screen": "deadline",
+      "requires": { "hasSheet": true, "route": "#/" }
+    },
+    {
+      "id": "deadline.remove",
+      "label": "Remove",
+      "selector": "text=Remove",
+      "screen": "deadline",
+      "requires": { "hasSheet": true, "route": "#/", "hasDeadline": true }
+    },
+    {
+      "id": "peopleTable.row.open",
+      "label": "row click → person",
+      "selector": "tr.entry",
+      "screen": "people-table",
+      "requires": { "hasSheet": true, "route": "#/" },
+      "notes": "Clicking anywhere on a row (outside links) navigates to that person."
+    },
+    {
+      "id": "person.back",
+      "label": "← Back to the register",
+      "selector": "text=← Back to the register",
+      "screen": "person",
+      "requires": { "hasSheet": true, "route": "#/p/r2" }
+    },
+    {
+      "id": "person.pager.next",
+      "label": "pager next",
+      "selector": ".person__pager a:nth-of-type(1)",
+      "screen": "person",
+      "requires": { "hasSheet": true, "route": "#/p/r2" },
+      "notes": "The pager has Previous (or Next) depending on position. With row 2 selected, Next is present."
+    },
+    {
+      "id": "errorBoundary.reload",
+      "label": "Reload the register",
+      "selector": "text=Reload the register",
+      "screen": "error-boundary",
+      "notes": "Shown only when the ErrorBoundary catches a throw. Triggering it on demand would require crashing the app; we cover the path with a separate unit test in App.test.tsx and skip here unless an error happens to be raised during the run."
+    },
+    {
+      "id": "similarity.back",
+      "label": "← Back to the register",
+      "selector": "text=← Back to the register",
+      "screen": "similarity",
+      "requires": { "hasSheet": true, "route": "#/s" }
+    }
+  ]
+}

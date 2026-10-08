@@ -10,6 +10,8 @@ export default defineConfig({
       'worker/**/*.test.ts',
       'src/**/*.test.ts',
       'src/**/*.test.tsx',
+      'qa/**/*.test.ts',
+      'qa/**/*.test.tsx',
     ],
     coverage: {
       provider: 'v8',
