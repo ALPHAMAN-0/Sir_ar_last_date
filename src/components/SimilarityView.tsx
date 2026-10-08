@@ -32,6 +32,7 @@ import { useApp, usePeople } from '../state/hooks.ts'
 import { loadCommits } from '../state/person.ts'
 import { client } from '../state/store.ts'
 import { PauseNotice } from './PauseNotice.tsx'
+import { SingleCheck } from './SingleCheck.tsx'
 import { FirstCell, FirstEvidence } from './WhoFirst.tsx'
 
 // File lists are addressed by commit id, so one loader keeps them for the whole session.
@@ -271,6 +272,8 @@ export function SimilarityView() {
       </header>
 
       <PauseNotice />
+
+      <SingleCheck />
 
       {sameRepo.length > 0 ? (
         <div className="notice notice--bad similarity__same" role="note">
