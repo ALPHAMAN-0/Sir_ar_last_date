@@ -390,7 +390,8 @@ describe('/commit', () => {
 
   it('returns paths and counts but never diff text or emails', async () => {
     const calls = stubFetch(
-      () => new Response(commitBody('@@ -1 +1 @@ SECRET-DIFF'), { headers: { link: '<x>; rel="next"' } }),
+      () =>
+        new Response(commitBody('@@ -1 +1 @@\n-old\n+new SECRET-DIFF'), { headers: { link: '<x>; rel="next"' } }),
     )
     const { res, body } = await get(commitUrl({ repo: 'a/x', sha: SHA }))
     expect(res.headers.get('cache-control')).toBe('public, max-age=604800, immutable')
@@ -398,13 +399,14 @@ describe('/commit', () => {
       sha: SHA,
       stats: { additions: 12, deletions: 2 },
       files: [
-        { path: 'src/app.js', status: 'modified', additions: 12, deletions: 2 },
+        { path: 'src/app.js', status: 'modified', additions: 12, deletions: 2, realChange: true },
         {
           path: 'docs/new.md',
           status: 'renamed',
           additions: 0,
           deletions: 0,
           previousPath: 'docs/old.md',
+          realChange: false,
         },
       ],
       more: true,
@@ -428,6 +430,36 @@ describe('/commit', () => {
     expect(res.status).toBe(200)
     expect(body.tooLarge).toBe(true)
     expect(res.headers.get('cache-control')).toBe('public, max-age=0, s-maxage=600')
+  })
+
+  it("says whether a file's text changed beyond whitespace, judged from a diff it never passes on", async () => {
+    const files = [
+      // Spaces and a tab moved about, and the last line lost its newline. The text is the same.
+      {
+        filename: 'a.js',
+        status: 'modified',
+        additions: 2,
+        deletions: 2,
+        patch: '@@ -1,2 +1,2 @@\n-a = 1\n+a  =  1\n-\tb\n+b\n\\ No newline at end of file',
+      },
+      { filename: 'b.js', status: 'modified', additions: 1, deletions: 1, patch: '@@ -1 +1 @@\n-a = 1\n+a = 2' },
+      // Only blank lines were added.
+      { filename: 'c.js', status: 'modified', additions: 2, deletions: 0, patch: '@@ -1 +1,3 @@\n a\n+\n+   ' },
+      // A hunk header and nothing else.
+      { filename: 'd.js', status: 'modified', additions: 0, deletions: 0, patch: '@@ -0,0 +0,0 @@' },
+      // A picture: GitHub sends no diff for it.
+      { filename: 'e.png', status: 'modified', additions: 0, deletions: 0 },
+      // Moved and also changed, with no diff to judge the change by.
+      { filename: 'f.js', status: 'renamed', additions: 3, deletions: 1, previous_filename: 'g.js' },
+    ]
+    stubFetch(() => new Response(JSON.stringify({ sha: SHA, stats: { additions: 8, deletions: 4 }, files })))
+    const { body } = await get(commitUrl({ repo: 'a/x', sha: SHA }))
+    expect(body.files.map((file: { realChange?: boolean }) => file.realChange)).toEqual([
+      false, true, false, false, undefined, undefined,
+    ])
+    expect(body.files[4]).not.toHaveProperty('realChange')
+    expect(body.files[5]).not.toHaveProperty('realChange')
+    expect(JSON.stringify(body)).not.toContain('@@')
   })
 })
 

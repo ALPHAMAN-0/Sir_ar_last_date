@@ -4,6 +4,7 @@
 
 import { countCommitShares, type CommitShares } from '../logic/commitShares.ts'
 import { apiRepoName } from '../logic/repoName.ts'
+import { checksOf } from './padding.ts'
 import { loadCommits } from './person.ts'
 import { repoFacts, type PersonRow } from './store.ts'
 
@@ -12,7 +13,10 @@ async function readCommitShares(key: string): Promise<CommitShares> {
   // As for the first push: no work, not found, or not checked means nobody's commits to count.
   if (meta?.state !== 'ok' || verdict.status === 'no_submission' || !meta.headOid) return { kind: 'none' }
   try {
-    return countCommitShares(await loadCommits(apiRepoName(meta), meta.headOid))
+    const repo = apiRepoName(meta)
+    // What "Check commits" found, when it ran for this repo; without it, the counts are left out.
+    const checks = checksOf(repo)
+    return countCommitShares(await loadCommits(repo, meta.headOid), checks.size > 0 ? checks : undefined)
   } catch {
     return { kind: 'failed' }
   }

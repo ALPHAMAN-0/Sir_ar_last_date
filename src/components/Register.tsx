@@ -12,6 +12,7 @@ import { formatDateTime, zoneLabel } from '../logic/time.ts'
 import { loadCommitShares } from '../state/commitShares.ts'
 import { loadFirstPushes } from '../state/firstPushes.ts'
 import { useApp, useNow, usePeople } from '../state/hooks.ts'
+import { loadPadding, type PaddingProgress } from '../state/padding.ts'
 import {
   clearSheet,
   currentPeople,
@@ -46,6 +47,8 @@ export function Register() {
   const [reading, setReading] = useState<{ what: 'first pushes' | 'commits'; done: number; total: number } | null>(
     null,
   )
+  /** Set while "Check commits" reads the commit lists, then the files of every commit. */
+  const [checkingCommits, setCheckingCommits] = useState<PaddingProgress | null>(null)
 
   const deadlinePassed = deadline !== null && now > deadline
   const counts = useMemo(() => countByStatus(people), [people])
@@ -102,6 +105,15 @@ export function Register() {
       setDownloadFailed(true)
     } finally {
       setReading(null)
+    }
+  }
+
+  /** Which commits are padding: judged from the files of every commit of every repo on screen. */
+  const checkCommits = async () => {
+    try {
+      await loadPadding(shown, setCheckingCommits)
+    } finally {
+      setCheckingCommits(null)
     }
   }
 
@@ -222,20 +234,24 @@ export function Register() {
         <p className="toolbar__checked" aria-live="polite">
           {reading
             ? `Reading ${reading.what} for the file: ${reading.done} of ${reading.total} repos`
-            : checking
-              ? loadingRepos > 0
-                ? `Checking ${repoCount - loadingRepos} of ${repoCount} repos`
-                : 'Checking push times'
-              : checkedAt
-                ? `Checked ${formatDateTime(checkedAt)}`
-                : ''}
+            : checkingCommits
+              ? checkingCommits.phase === 'lists'
+                ? `Reading the commits of ${checkingCommits.total} repos: ${checkingCommits.done} of ${checkingCommits.total}`
+                : `Checking the files of ${checkingCommits.total} commits: ${checkingCommits.done} of ${checkingCommits.total}`
+              : checking
+                ? loadingRepos > 0
+                  ? `Checking ${repoCount - loadingRepos} of ${repoCount} repos`
+                  : 'Checking push times'
+                : checkedAt
+                  ? `Checked ${formatDateTime(checkedAt)}`
+                  : ''}
         </p>
         {/* A refresh would drop the push logs a download is waiting for. */}
         <button
           type="button"
           className="button"
           onClick={refresh}
-          disabled={loadingRepos > 0 || reading !== null}
+          disabled={loadingRepos > 0 || reading !== null || checkingCommits !== null}
         >
           Refresh
         </button>
@@ -243,9 +259,17 @@ export function Register() {
           type="button"
           className="button"
           onClick={() => void download()}
-          disabled={shown.length === 0 || reading !== null}
+          disabled={shown.length === 0 || reading !== null || checkingCommits !== null}
         >
           {filtered ? `Download ${shown.length} ${shown.length === 1 ? 'row' : 'rows'}` : 'Download .xlsx'}
+        </button>
+        <button
+          type="button"
+          className="button"
+          onClick={() => void checkCommits()}
+          disabled={shown.length === 0 || reading !== null || checkingCommits !== null}
+        >
+          Check commits
         </button>
       </div>
       {loadingRepos > 0 ? (

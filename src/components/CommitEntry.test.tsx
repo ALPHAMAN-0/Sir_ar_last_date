@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CommitInfo } from '../../shared/api.ts'
+import type { CommitCheck } from '../logic/padding.ts'
 import type { PushInfo } from '../logic/pushAttribution.ts'
 import { formatDateTime, parseDeadlineInput } from '../logic/time.ts'
 import { failure, oid, stubApi, stubIntersectionObserver } from '../test/fakeApi.ts'
@@ -27,7 +28,9 @@ const pushedAt = (iso: string): PushInfo => ({ pushedAt: iso, knownBefore: null 
 let fake: ReturnType<typeof stubApi>
 let viewport: ReturnType<typeof stubIntersectionObserver>
 
-async function show(props: { commit?: CommitInfo; push?: PushInfo; deadline?: number | null; autoFiles?: boolean } = {}) {
+async function show(
+  props: { commit?: CommitInfo; push?: PushInfo; deadline?: number | null; autoFiles?: boolean; check?: CommitCheck } = {},
+) {
   vi.resetModules()
   const { CommitEntry } = await import('./CommitEntry.tsx')
   render(
@@ -38,6 +41,7 @@ async function show(props: { commit?: CommitInfo; push?: PushInfo; deadline?: nu
         push={props.push}
         deadline={props.deadline === undefined ? DEADLINE : props.deadline}
         autoFiles={props.autoFiles ?? false}
+        check={props.check}
       />
     </ol>,
   )
@@ -132,6 +136,8 @@ describe('CommitEntry', () => {
 
       await screen.findByRole('link', { name: 'src/login.js' })
       expect(screen.queryByRole('button', { name: 'Show files' })).toBeNull()
+      // The padding check reads the same answer: still one request.
+      expect(fake.paths().filter((path) => path === '/api/v1/commit')).toHaveLength(1)
       expect(files().map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
         ['src/login.js', `${COMMIT_URL}#diff-5b5681921145431b544230214222dda2e5bd119716165db1be296777f8b13ed6`],
         ['src/old-form.js → src/form.js', `${COMMIT_URL}#diff-915097a02e35fa2bada093b9f0ee054f72fb0476d1a591ccf2eb216239251c9a`],
@@ -186,6 +192,22 @@ describe('CommitEntry', () => {
       fake.api.files[SHA] = files
       fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
       expect(await screen.findByRole('link', { name: 'src/login.js' })).toBeTruthy()
+    })
+
+    it('is tagged with what the padding check found', async () => {
+      await show({ check: { kind: 'whitespace', tiny: false } })
+      expect(screen.getByText('Only whitespace')).toBeTruthy()
+      cleanup()
+      await show({ check: { kind: 'empty', tiny: false } })
+      expect(screen.getByText('No changes')).toBeTruthy()
+      cleanup()
+      await show({ check: { kind: 'real', tiny: true } })
+      expect(screen.getByText('Tiny')).toBeTruthy()
+      expect(screen.queryByText('Only whitespace')).toBeNull()
+      cleanup()
+      await show({ check: { kind: 'real', tiny: false } })
+      expect(screen.queryByText('Tiny')).toBeNull()
+      expect(screen.queryByText('No changes')).toBeNull()
     })
 
     it('loads them by itself once the commit has stayed on screen for a moment', async () => {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ActivityEvent, CommitInfo } from '../../shared/api.ts'
+import type { ActivityEvent, CommitFilesResponse, CommitInfo } from '../../shared/api.ts'
 import { ZERO_OID } from '../../shared/validate.ts'
 import { formatDateTime, parseDeadlineInput } from '../logic/time.ts'
 import { failure, okRepo, oid, saveSheet, stubApi, stubIntersectionObserver } from '../test/fakeApi.ts'
@@ -29,6 +29,15 @@ const commit = (headline: string, committedAt: string, parents: string[]): Commi
   parents,
   authorName: null,
   authorLogin: 'nusrat',
+})
+
+/** The files of one commit as the Worker answers them: one changed file, real or whitespace only. */
+const changed = (lines: number, realChange: boolean): CommitFilesResponse => ({
+  sha: '',
+  stats: { additions: lines, deletions: 0 },
+  files: [{ path: 'src/app.js', status: 'modified', additions: lines, deletions: 0, realChange }],
+  more: false,
+  tooLarge: false,
 })
 
 let fake: ReturnType<typeof stubApi>
@@ -65,6 +74,12 @@ beforeEach(() => {
         commit('Finish the task', at(-1500), []),
       ],
       'salma/late-start': [commit('Start late', at(190), [])],
+    },
+    files: {
+      [oid('First page')]: changed(40, true),
+      [oid('Polish after review')]: changed(3, false),
+      [oid('Finish the task')]: changed(1, true),
+      [oid('Start late')]: changed(12, true),
     },
   })
   stubIntersectionObserver()
@@ -181,6 +196,25 @@ describe('PersonView', () => {
     await waitFor(() => expect(facts()['First push']).toBe('Could not be loaded'))
     expect(screen.getByText('On time')).toBeTruthy()
     await screen.findByRole('link', { name: 'First page' })
+  })
+
+  it('checks which commits are padding and sums them up per person', async () => {
+    await openPerson('r3')
+    expect(await screen.findByText('Checked all 2 commits.')).toBeTruthy()
+    const shares = screen.getByRole('region', { name: 'Commits by person' })
+    const rows = within(shares)
+      .getAllByRole('row')
+      .map((row) => [...row.querySelectorAll('th, td')].map((cell) => cell.textContent))
+    expect(rows).toEqual([
+      ['Person', 'Commits', 'Real', 'Tiny', 'Only whitespace', 'Empty', 'Not checked'],
+      ['nusrat', '2', '1', '1', '1', '0', '0'],
+    ])
+    // The timeline marks the padding commit, without loading its files on screen.
+    const timeline = screen.getByRole('region', { name: 'Commits by date' })
+    expect(within(timeline).getByText('Only whitespace')).toBeTruthy()
+    expect(within(timeline).queryByRole('link', { name: 'src/app.js' })).toBeNull()
+    expect(fake.paths().filter((path) => path === '/api/v1/commit')).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: /Check all/ })).toBeNull()
   })
 
   it('explains a link that could not be read, with nothing to load', async () => {

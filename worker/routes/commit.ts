@@ -15,10 +15,37 @@ type RawFile = {
   additions?: number
   deletions?: number
   previous_filename?: string
+  /** The unified diff of this file: hunks only, no file headers. Absent for binary files. */
+  patch?: string
 }
 type RawCommit = { stats?: { additions?: number; deletions?: number }; files?: RawFile[] }
 
-/** The files changed by one commit: path, kind of change and line counts. No diff text. */
+/** All whitespace taken out of a diff line, so that lines that differ only in spacing read the same. */
+const bare = (line: string) => line.slice(1).replace(/\s+/g, '')
+
+/**
+ * Whether the file's text changed beyond whitespace, judged from the diff and
+ * never passed on. Undefined when GitHub sent no diff to judge by: a binary
+ * file, or a diff it left out. A file moved without a change has no diff either.
+ */
+function realChange(file: RawFile): boolean | undefined {
+  if (typeof file.patch !== 'string') {
+    const moved = file.status === 'renamed' || file.status === 'copied'
+    return moved && !file.additions && !file.deletions ? false : undefined
+  }
+  let added = ''
+  let removed = ''
+  for (const line of file.patch.split('\n')) {
+    if (line.startsWith('+')) added += bare(line)
+    else if (line.startsWith('-')) removed += bare(line)
+  }
+  return added !== removed
+}
+
+/**
+ * The files changed by one commit: path, kind of change, line counts and
+ * whether the text changed beyond whitespace. No diff text.
+ */
 export async function handleCommit(env: Env, params: CommitParams): Promise<Response> {
   const { owner, name } = splitRepoKey(params.repo)
   const page = params.page ?? 1
@@ -63,6 +90,8 @@ export async function handleCommit(env: Env, params: CommitParams): Promise<Resp
       deletions: Number(file.deletions ?? 0),
     }
     if (typeof file.previous_filename === 'string') change.previousPath = file.previous_filename
+    const real = realChange(file)
+    if (real !== undefined) change.realChange = real
     files.push(change)
   }
   const body: CommitFilesResponse = {

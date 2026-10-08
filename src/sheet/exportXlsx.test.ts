@@ -93,7 +93,7 @@ describe('the results report', () => {
   it('has the columns of the register in the register\'s order with the first push among the dates, then the extra ones', () => {
     expect(roundTrip([row()]).grid('Results')[0]).toEqual([
       'Row', 'ID', 'Name', 'Repo', 'Status', 'Late by', 'Repo created', 'First push', 'Last push', 'Last commit', 'Commits',
-      'Late (minutes)', 'Last on-time push', 'Branch', 'Commits by person',
+      'Late (minutes)', 'Last on-time push', 'Branch', 'Commits by person', 'Padding commits',
     ])
   })
 
@@ -158,17 +158,17 @@ describe('the results report', () => {
     expect(fill(results.E7)).toBe('E6E6E6') // Invalid link
     const xml = sheetXml(bytes, 1)
     expect(xml).toContain('state="frozen"')
-    expect(xml).toContain('<autoFilter ref="A1:O9"/>')
+    expect(xml).toContain('<autoFilter ref="A1:P9"/>')
   })
 
   it('colours the whole row of a person, blank cells and dates included', () => {
     process.env.TZ = 'Asia/Dhaka'
     const { results } = roundTrip(klass)
-    expect(rowFills(results, 2, 'O')).toEqual(['D4EFDB']) // On time
-    expect(rowFills(results, 5, 'O')).toEqual(['F6CDC8']) // Late
-    expect(rowFills(results, 6, 'O')).toEqual(['FBE6B3']) // Changed after deadline
-    expect(rowFills(results, 7, 'O')).toEqual(['E6E6E6']) // Invalid link
-    expect(rowFills(results, 8, 'O')).toEqual(['E6E6E6']) // Not found
+    expect(rowFills(results, 2, 'P')).toEqual(['D4EFDB']) // On time
+    expect(rowFills(results, 5, 'P')).toEqual(['F6CDC8']) // Late
+    expect(rowFills(results, 6, 'P')).toEqual(['FBE6B3']) // Changed after deadline
+    expect(rowFills(results, 7, 'P')).toEqual(['E6E6E6']) // Invalid link
+    expect(rowFills(results, 8, 'P')).toEqual(['E6E6E6']) // Not found
     // A coloured date is still a date, and a coloured link still a link.
     expect(results.I5.w).toBe('05 Oct 2026, 21:10')
     expect(results.D5.l?.Target).toBe('https://github.com/x/A4')
@@ -180,9 +180,9 @@ describe('the results report', () => {
       row({ status: 'Has work', statusKey: 'submitted' }),
       row({ status: 'Checking', statusKey: 'checking' }),
     ])
-    expect(rowFills(results, 2, 'O')).toEqual(['F6CDC8'])
-    expect(rowFills(results, 3, 'O')).toEqual(['DCE8F7'])
-    expect(rowFills(results, 4, 'O')).toEqual([undefined])
+    expect(rowFills(results, 2, 'P')).toEqual(['F6CDC8'])
+    expect(rowFills(results, 3, 'P')).toEqual(['DCE8F7'])
+    expect(rowFills(results, 4, 'P')).toEqual([undefined])
   })
 
   it('colours whole rows on the "Needs attention" sheet too', () => {
@@ -305,6 +305,24 @@ describe('the results report', () => {
     expect(results.O2.v).toBe('Could not be loaded')
     expect(results.O3.v).toMatch(/ \(of the newest 1,000 commits\)$/)
     expect(results.O4?.v ?? '').toBe('')
+  })
+
+  it('gives the padding count as a number once the commits were checked, and leaves it blank before', () => {
+    const checked = {
+      kind: 'counted' as const,
+      total: 4,
+      truncated: false,
+      authors: [
+        { who: 'rahim', login: 'rahim', commits: 3, merges: 0, checked: { real: 1, tiny: 1, whitespace: 1, empty: 1, unknown: 0 } },
+        { who: 'nusrat', login: 'nusrat', commits: 1, merges: 0, checked: { real: 1, tiny: 0, whitespace: 0, empty: 0, unknown: 0 } },
+      ],
+    }
+    const { results, grid } = roundTrip([row({ commitShares: checked }), row()])
+    expect(results.P1.v).toBe('Padding commits')
+    expect(results.P2).toMatchObject({ t: 'n', v: 2 })
+    expect(results.O2.v).toBe('rahim 3 (75%): 1 real (1 tiny), 1 only whitespace, 1 empty; nusrat 1 (25%): 1 real')
+    expect(results.P3?.v ?? '').toBe('')
+    expect(grid('Info').find((line) => line[0] === 'Padding commits')?.[1]).toContain('sorting')
   })
 
   it('never writes a formula, even when a cell starts with "="', () => {

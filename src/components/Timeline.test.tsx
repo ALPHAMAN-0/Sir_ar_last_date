@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ActivityEvent, CommitInfo } from '../../shared/api.ts'
 import { ZERO_OID } from '../../shared/validate.ts'
+import type { CommitCheck } from '../logic/padding.ts'
 import { parseDeadlineInput } from '../logic/time.ts'
 import type { CommitList } from '../state/person.ts'
 import { oid, stubApi, stubIntersectionObserver } from '../test/fakeApi.ts'
@@ -42,7 +43,16 @@ const push = (ts: string, before: string, after: string): ActivityEvent => ({
 // Three commits pushed together in time, the fix pushed the next morning.
 const EVENTS = [push(oct(6, 10, 5), oid('Add the form'), HEAD), push(oct(5, 22, 30), ZERO_OID, oid('Add the form'))]
 
-function show(props: Partial<{ list: CommitList; events: ActivityEvent[]; deadline: number | null; atDeadlineOid: string | null; changedAfter: boolean }> = {}) {
+function show(
+  props: Partial<{
+    list: CommitList
+    events: ActivityEvent[]
+    deadline: number | null
+    atDeadlineOid: string | null
+    changedAfter: boolean
+    checks: ReadonlyMap<string, CommitCheck>
+  }> = {},
+) {
   render(
     <Timeline
       repo={REPO}
@@ -52,6 +62,7 @@ function show(props: Partial<{ list: CommitList; events: ActivityEvent[]; deadli
       deadline={props.deadline === undefined ? DEADLINE : props.deadline}
       atDeadlineOid={props.atDeadlineOid ?? null}
       changedAfter={props.changedAfter ?? false}
+      checks={props.checks}
     />,
   )
 }
@@ -130,5 +141,20 @@ describe('Timeline', () => {
   it('says when only the newest part of a long history is shown', () => {
     show({ list: { commits: COMMITS, truncated: true } })
     expect(screen.getByText('This repo has a very long history. The newest 1,000 commits are shown.')).toBeTruthy()
+  })
+})
+
+describe('the padding check', () => {
+  it('hands each commit what was found about it', () => {
+    show({
+      checks: new Map([
+        [oid('Add the form'), { kind: 'whitespace', tiny: false }],
+        [oid('Fix the typo'), { kind: 'real', tiny: true }],
+      ]),
+    })
+    const entry = (name: string) => screen.getByRole('link', { name }).closest('li') as HTMLElement
+    expect(within(entry('Add the form')).getByText('Only whitespace')).toBeTruthy()
+    expect(within(entry('Fix the typo')).getByText('Tiny')).toBeTruthy()
+    expect(within(entry('Add styles')).queryByText(/Only whitespace|No changes|Tiny/)).toBeNull()
   })
 })

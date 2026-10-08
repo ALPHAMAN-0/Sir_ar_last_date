@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as XLSX from 'xlsx'
+import type { CommitFilesResponse, CommitInfo } from '../../shared/api.ts'
 import { ZERO_OID } from '../../shared/validate.ts'
 import { formatDateTime, formatDuration, parseDeadlineInput } from '../logic/time.ts'
 import { excelDate } from '../sheet/exportXlsx.ts'
@@ -195,7 +196,7 @@ describe('the register', () => {
 
       const results = XLSX.read(saved[0].bytes, { type: 'array' }).Sheets.Results
       const header = XLSX.utils.sheet_to_json<string[]>(results, { header: 1 })[0]
-      expect(header.at(-1)).toBe('Commits by person')
+      expect(header.slice(-2)).toEqual(['Commits by person', 'Padding commits'])
       // On screen order: Nusrat, Rahim, then the two rows without a repo.
       expect([results.O2.v, results.O3.v]).toEqual(['nusrat 1 (100%)', 'rahim 2 (67%, 1 merge); nusrat 1 (33%)'])
       expect([results.O4?.v ?? '', results.O5?.v ?? '']).toEqual(['', ''])
@@ -304,6 +305,94 @@ describe('the register', () => {
       await waitFor(() => expect(saved).toHaveLength(1))
       expect(await screen.findByText(`Checked ${formatDateTime(FETCHED_AT)}`)).toBeTruthy()
       expect((screen.getByRole('button', { name: 'Download .xlsx' }) as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    /** Holds back the files of every commit until `release()`, as a slow network would. */
+    function holdFiles() {
+      let release = () => {}
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const answer = fake.fetch.getMockImplementation() as typeof fetch
+      fake.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+        if (new URL(String(input), 'http://localhost').pathname === '/api/v1/commit') await held
+        return answer(input)
+      })
+      return () => release()
+    }
+
+    /** The files of one commit as the Worker answers them: one changed file, real or whitespace only. */
+    const changed = (lines: number, realChange: boolean): CommitFilesResponse => ({
+      sha: '',
+      stats: { additions: lines, deletions: 0 },
+      files: [{ path: 'src/app.js', status: 'modified', additions: lines, deletions: 0, realChange }],
+      more: false,
+      tooLarge: false,
+    })
+
+    /** Two repos with work: one of Rahim's commits changed only whitespace, and Nusrat helped him with a tiny one. */
+    function commitsToCheck() {
+      const at = '2026-09-28T10:00:00Z'
+      const commit = (seed: string, login: string): CommitInfo => ({
+        oid: oid(seed), committedAt: at, authoredAt: at, headline: seed, parents: [], authorName: null, authorLogin: login,
+      })
+      fake.api.commits['octocat/hello-world'] = [commit('real', 'rahim'), commit('blank', 'rahim'), commit('theirs', 'nusrat')]
+      fake.api.commits['octocat/spoon-knife'] = [commit('only', 'nusrat')]
+      fake.api.files[oid('real')] = changed(40, true)
+      fake.api.files[oid('blank')] = changed(2, false)
+      fake.api.files[oid('theirs')] = changed(1, true)
+      fake.api.files[oid('only')] = changed(5, true)
+    }
+    const fileRequests = () => fake.paths().filter((path) => path === '/api/v1/commit').length
+    const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement
+
+    it('checks every commit on screen for padding, says how far it is, and writes what it found', async () => {
+      commitsToCheck()
+      const release = holdFiles()
+      await openRegister()
+      fireEvent.click(button('Check commits'))
+
+      expect(await screen.findByText(/^Checking the files of 4 commits: \d of 4$/)).toBeTruthy()
+      for (const name of ['Refresh', 'Download .xlsx', 'Check commits']) expect(button(name).disabled, name).toBe(true)
+      release()
+      expect(await screen.findByText(`Checked ${formatDateTime(FETCHED_AT)}`)).toBeTruthy()
+      await waitFor(() => expect(button('Check commits').disabled).toBe(false))
+      expect(fileRequests()).toBe(4)
+
+      // A second check finds everything already known.
+      fireEvent.click(button('Check commits'))
+      await waitFor(() => expect(button('Check commits').disabled).toBe(false))
+      expect(fileRequests()).toBe(4)
+
+      fireEvent.click(button('Download .xlsx'))
+      await waitFor(() => expect(saved).toHaveLength(1))
+      const results = XLSX.read(saved[0].bytes, { type: 'array' }).Sheets.Results
+      // On screen order: Nusrat, Rahim, then the two rows without a repo.
+      expect(results.O2.v).toBe('nusrat 1 (100%): 1 real')
+      expect(results.O3.v).toBe('rahim 2 (67%): 1 real, 1 only whitespace; nusrat 1 (33%): 1 real (1 tiny)')
+      expect(results.P1.v).toBe('Padding commits')
+      expect(results.P2).toMatchObject({ t: 'n', v: 0 })
+      expect(results.P3).toMatchObject({ t: 'n', v: 1 })
+      expect([results.P4?.v ?? '', results.P5?.v ?? '']).toEqual(['', ''])
+      expect(fileRequests()).toBe(4)
+    })
+
+    it('checks only the repos on screen, and leaves the others unchecked in the file', async () => {
+      commitsToCheck()
+      await openRegister()
+      search('spoon')
+      fireEvent.click(button('Check commits'))
+      await waitFor(() => expect(fileRequests()).toBe(1))
+      await waitFor(() => expect(button('Check commits').disabled).toBe(false))
+
+      search('')
+      fireEvent.click(button('Download .xlsx'))
+      await waitFor(() => expect(saved).toHaveLength(1))
+      const results = XLSX.read(saved[0].bytes, { type: 'array' }).Sheets.Results
+      expect(results.O2.v).toBe('nusrat 1 (100%): 1 real')
+      expect(results.O3.v).toBe('rahim 2 (67%); nusrat 1 (33%)')
+      expect(results.P2).toMatchObject({ t: 'n', v: 0 })
+      expect(results.P3?.v ?? '').toBe('')
     })
 
     it('writes no file when the sheet is removed while the first pushes are read', async () => {

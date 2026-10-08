@@ -43,6 +43,12 @@ rewrite (deployed 2026-10-06, version 4f73fa07).
       committed on the main branch with their commits and share, merges included and
       shown. Read when Download is pressed, after the first pushes, from the same commit
       lists the person screen uses (see README, "The results report").
+- [x] Padding commits (2026-10-08): the Worker says per file whether the text changed
+      beyond whitespace (judged from the diff, which still never leaves the Worker);
+      "Check commits" on the Register reads the files of every commit on screen (newest
+      200 per repo) and the report tells real, tiny, only-whitespace and empty commits
+      apart per person, with a "Padding commits" number column; the person screen tags
+      each commit and sums them up per person (see README, "The results report").
 
 ## Not done
 - [ ] Go online from GitHub Actions only when the tests pass (2026-10-07). The

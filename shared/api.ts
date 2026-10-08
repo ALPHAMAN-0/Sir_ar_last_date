@@ -75,6 +75,12 @@ export type FileChange = {
   additions: number
   deletions: number
   previousPath?: string
+  /**
+   * True when the file's text changed beyond whitespace; false when only
+   * whitespace, or nothing, changed (a pure rename included). Missing when the
+   * Worker cannot tell: a binary file, or a diff GitHub left out.
+   */
+  realChange?: boolean
 }
 export type CommitFilesResponse = {
   sha: string

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ApiError } from '../api/client.ts'
+import { countCommitShares } from '../logic/commitShares.ts'
 import { FIRST_PUSH_BY_COMMIT_NOTE, firstPush, firstPushText } from '../logic/firstPush.ts'
 import {
   filterPeople,
@@ -12,9 +13,11 @@ import {
 import { apiRepoName } from '../logic/repoName.ts'
 import { formatDateTime, formatDuration } from '../logic/time.ts'
 import { LINK_PROBLEM_TEXT } from '../sheet/parseRepoLink.ts'
-import { personHref, useApp, useNow, usePeople } from '../state/hooks.ts'
+import { personHref, useApp, useChecks, useNow, usePeople } from '../state/hooks.ts'
+import { checkRepo, MAX_CHECKED_COMMITS } from '../state/padding.ts'
 import { loadCommits, type CommitList } from '../state/person.ts'
 import { HISTORY_PAGES, loadActivity, type PersonRow } from '../state/store.ts'
+import { PauseNotice } from './PauseNotice.tsx'
 import { Stamp } from './Stamp.tsx'
 import { Timeline } from './Timeline.tsx'
 
@@ -54,6 +57,35 @@ function useCommitList(repo: string | null, headOid: string | null) {
       setAttempt((count) => count + 1)
     },
   }
+}
+
+type Checking = { done: number; total: number; all: boolean; running: boolean }
+
+/**
+ * Checks which commits are padding, the newest ones as soon as the list is
+ * here, all of them on request. The findings themselves live in the store.
+ */
+function usePaddingCheck(repo: string | null, list: CommitList | undefined) {
+  const [state, setState] = useState<Checking | null>(null)
+  // "Check all" holds for one list only: another person, or a new push, starts over.
+  const [allFor, setAllFor] = useState<CommitList | null>(null)
+  const all = allFor === list
+
+  useEffect(() => {
+    if (!repo || !list) return
+    let live = true
+    void checkRepo(repo, list.commits, {
+      limit: all ? list.commits.length : MAX_CHECKED_COMMITS,
+      onProgress: (done, total) => {
+        if (live) setState({ done, total, all: total === list.commits.length, running: done < total })
+      },
+    })
+    return () => {
+      live = false
+    }
+  }, [repo, list, all])
+
+  return { checking: state, checkAll: () => setAllFor(list ?? null) }
 }
 
 function explain(person: PersonRow, deadlinePassed: boolean): string {
@@ -104,6 +136,9 @@ export function PersonView({ rowId }: { rowId: string }) {
   const headOid = meta?.headOid ?? null
   const pushedAt = meta?.pushedAt ?? null
   const { list, error, retry } = useCommitList(repo, headOid)
+  const checks = useChecks(repo)
+  const { checking, checkAll } = usePaddingCheck(repo, list)
+  const shares = useMemo(() => (list ? countCommitShares(list, checks) : null), [list, checks])
 
   // Newer browsers return a promise from scrollTo, and an effect must not return one.
   useEffect(() => {
@@ -187,6 +222,7 @@ export function PersonView({ rowId }: { rowId: string }) {
           ) : null}
         </div>
       </header>
+      <PauseNotice />
 
       {meta ? (
         <dl className="facts">
@@ -222,6 +258,52 @@ export function PersonView({ rowId }: { rowId: string }) {
         </dl>
       ) : null}
 
+      {list && shares?.kind === 'counted' && list.commits.length > 0 ? (
+        <section className="shares" aria-label="Commits by person">
+          <h2 className="timeline__title">Commits by person</h2>
+          <p className="shares__status" role="status">
+            {!checking
+              ? 'Checking the commits.'
+              : checking.running
+                ? `Checking ${checking.done} of ${checking.total} commits`
+                : checking.all
+                  ? `Checked all ${checking.total} commits.`
+                  : `Checked the newest ${checking.total} commits.`}{' '}
+            {checking && !checking.running && !checking.all ? (
+              <button type="button" className="linkish" onClick={checkAll}>
+                Check all {list.commits.length} commits
+              </button>
+            ) : null}
+          </p>
+          <table className="shares__table">
+            <thead>
+              <tr>
+                <th scope="col">Person</th>
+                <th scope="col">Commits</th>
+                <th scope="col">Real</th>
+                <th scope="col">Tiny</th>
+                <th scope="col">Only whitespace</th>
+                <th scope="col">Empty</th>
+                <th scope="col">Not checked</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shares.authors.map((author) => (
+                <tr key={author.who}>
+                  <th scope="row">{author.who}</th>
+                  <td className="mono">{author.commits}</td>
+                  <td className="mono">{author.checked?.real ?? 0}</td>
+                  <td className="mono">{author.checked?.tiny ?? 0}</td>
+                  <td className="mono">{author.checked?.whitespace ?? 0}</td>
+                  <td className="mono">{author.checked?.empty ?? 0}</td>
+                  <td className="mono">{author.checked?.unknown ?? author.commits}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
+
       {repo && headOid ? (
         <section className="timeline" aria-label="Commits by date">
           <h2 className="timeline__title">Which date, which files</h2>
@@ -243,6 +325,7 @@ export function PersonView({ rowId }: { rowId: string }) {
               deadline={deadline}
               atDeadlineOid={verdict.atDeadlineOid}
               changedAfter={verdict.status === 'changed_after'}
+              checks={checks}
             />
           )}
         </section>

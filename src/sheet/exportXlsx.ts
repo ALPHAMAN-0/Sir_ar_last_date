@@ -8,7 +8,7 @@
 //   Info             when and how the file was made, and what each status means
 
 import * as XLSX from 'xlsx'
-import { commitSharesText, type CommitShares } from '../logic/commitShares.ts'
+import { commitSharesText, paddingCommits, type CommitShares } from '../logic/commitShares.ts'
 import { firstPushText, type FirstPush } from '../logic/firstPush.ts'
 import { STATUS_TONE } from '../logic/people.ts'
 import type { Status } from '../logic/verdict.ts'
@@ -171,6 +171,8 @@ const RESULT_COLUMNS: ReadonlyArray<Column<ExportRow>> = [
   { title: 'Branch', width: 12, cell: (row) => text(row.branch) },
   // Last, so that no column of the register moves: who committed, with each person's share.
   { title: 'Commits by person', width: 60, cell: (row) => text(commitSharesText(row.commitShares)) },
+  // A number, so the class sorts by it. Blank until "Check commits" has looked at the repo.
+  { title: 'Padding commits', width: 10, cell: (row) => number(paddingCommits(row.commitShares)) },
 ]
 
 /** Statuses that ask the teacher to do something, most urgent first. */
@@ -393,7 +395,13 @@ function infoSheet(info: ExportInfo): XLSX.WorkSheet {
     [
       'Commits by person',
       text(
-        "Who committed on the main branch, with each person's commits and share of all commits, the largest share first; merge commits count and are shown. A person is named by their GitHub login, or by the name written in the commit when GitHub cannot tell whose it is. Counted from the newest 1,000 commits at most; the cell says when a repo has more.",
+        "Who committed on the main branch, with each person's commits and share of all commits, the largest share first; merge commits count and are shown. A person is named by their GitHub login, or by the name written in the commit when GitHub cannot tell whose it is. Counted from the newest 1,000 commits at most; the cell says when a repo has more. After \"Check commits\" on the page, each person's commits are also sorted into real (tiny: two lines or fewer), only whitespace, empty (no file changed) and not checked (no diff to judge by, beyond the newest 200, or a load that failed). This is judged from the text of each commit's changes, never from its message.",
+      ),
+    ],
+    [
+      'Padding commits',
+      text(
+        'Only-whitespace and empty commits of everyone on the repo, as a number for sorting. Blank when the repo was not checked.',
       ),
     ],
     ...MEANING.map(([label, meaning]): [string, XLSX.CellObject] => [`Status: ${label}`, text(meaning)]),

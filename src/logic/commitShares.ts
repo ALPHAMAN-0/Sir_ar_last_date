@@ -5,6 +5,7 @@
 
 import type { CommitInfo } from '../../shared/api.ts'
 import type { CommitList } from '../state/person.ts'
+import type { CommitCheck } from './padding.ts'
 
 export type CommitAuthor = {
   /** The GitHub login, or the name written in the commit, as the person page shows it. */
@@ -14,6 +15,22 @@ export type CommitAuthor = {
   commits: number
   /** Of those commits, how many have more than one parent. */
   merges: number
+  /** Set only when the repo's commits were checked for padding. */
+  checked?: CheckedCounts
+}
+
+/** What a padding check found among one person's commits. */
+export type CheckedCounts = {
+  /** Commits that changed some text beyond whitespace. */
+  real: number
+  /** Of the real ones, those of two lines or fewer. */
+  tiny: number
+  /** Commits that changed only whitespace. */
+  whitespace: number
+  /** Commits that changed no file. */
+  empty: number
+  /** Commits the check could not judge, or did not reach. */
+  unknown: number
 }
 
 export type CommitShares =
@@ -37,8 +54,11 @@ const nameOf = (commit: CommitInfo) => commit.authorName?.trim() || null
  * Each person's commits on the main branch, the most commits first, ties by
  * name. A login is one account whatever its case, and a commit signed with a
  * name that spells someone's login is theirs too.
+ *
+ * @param checks what a padding check found, by commit id. When given, each
+ *   person's commits are sorted into real, whitespace-only, empty and not checked.
  */
-export function countCommitShares(list: CommitList): CommitShares {
+export function countCommitShares(list: CommitList, checks?: ReadonlyMap<string, CommitCheck>): CommitShares {
   const authors = new Map<string, CommitAuthor>()
   for (const commit of list.commits) {
     const login = loginOf(commit)
@@ -47,11 +67,20 @@ export function countCommitShares(list: CommitList): CommitShares {
     let author = authors.get(key)
     if (!author) {
       author = { who, login: null, commits: 0, merges: 0 }
+      if (checks) author.checked = { real: 0, tiny: 0, whitespace: 0, empty: 0, unknown: 0 }
       authors.set(key, author)
     }
     if (login && !author.login) author.login = login.toLowerCase()
     author.commits++
     if (commit.parents.length > 1) author.merges++
+    if (author.checked) {
+      const check = checks?.get(commit.oid)
+      if (!check || check.kind === 'unknown') author.checked.unknown++
+      else {
+        author.checked[check.kind]++
+        if (check.tiny) author.checked.tiny++
+      }
+    }
   }
   return {
     kind: 'counted',
@@ -67,7 +96,30 @@ function percentOf(commits: number, total: number): string {
   return pct === 0 ? '<1%' : `${pct}%`
 }
 
-/** "rahim 8 (67%, 2 merges); nusrat 4 (33%)". A list that is missing is explained in words. */
+/** "12 real (5 tiny), 26 only whitespace, 2 empty, 3 not checked": what a check found for one person. */
+function checkedText({ real, tiny, whitespace, empty, unknown }: CheckedCounts): string {
+  const n = (value: number) => value.toLocaleString('en')
+  const parts = [`${n(real)} real${tiny > 0 ? ` (${n(tiny)} tiny)` : ''}`]
+  if (whitespace > 0) parts.push(`${n(whitespace)} only whitespace`)
+  if (empty > 0) parts.push(`${n(empty)} empty`)
+  if (unknown > 0) parts.push(`${n(unknown)} not checked`)
+  return parts.join(', ')
+}
+
+/** Whitespace-only and empty commits of everyone on the repo, or null when the commits were not checked. */
+export function paddingCommits(shares: CommitShares): number | null {
+  if (shares.kind !== 'counted') return null
+  let sum: number | null = null
+  for (const { checked } of shares.authors) {
+    if (checked) sum = (sum ?? 0) + checked.whitespace + checked.empty
+  }
+  return sum
+}
+
+/**
+ * "rahim 8 (67%, 2 merges); nusrat 4 (33%)", and after a check
+ * "rahim 8 (67%): 5 real (1 tiny), 3 only whitespace". A list that is missing is explained in words.
+ */
 export function commitSharesText(shares: CommitShares): string {
   switch (shares.kind) {
     case 'none':
@@ -80,7 +132,8 @@ export function commitSharesText(shares: CommitShares): string {
       const parts = authors.slice(0, MAX_LISTED_AUTHORS).map((author) => {
         const merges =
           author.merges === 0 ? '' : `, ${author.merges} ${author.merges === 1 ? 'merge' : 'merges'}`
-        return `${author.who} ${author.commits.toLocaleString('en')} (${percentOf(author.commits, total)}${merges})`
+        const found = author.checked ? `: ${checkedText(author.checked)}` : ''
+        return `${author.who} ${author.commits.toLocaleString('en')} (${percentOf(author.commits, total)}${merges})${found}`
       })
       if (authors.length > MAX_LISTED_AUTHORS) parts.push(`and ${authors.length - MAX_LISTED_AUTHORS} more`)
       const list = parts.join('; ')

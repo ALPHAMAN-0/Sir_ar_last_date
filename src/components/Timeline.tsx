@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { ActivityEvent } from '../../shared/api.ts'
+import type { CommitCheck } from '../logic/padding.ts'
 import { repoUrl } from '../logic/people.ts'
 import { arrivedLate, attributePushes } from '../logic/pushAttribution.ts'
 import { formatDateTime, formatDayKey } from '../logic/time.ts'
@@ -9,6 +10,7 @@ import { CommitEntry } from './CommitEntry.tsx'
 
 /** Files load by themselves for this many commits; older ones wait for a click. */
 const AUTO_FILE_COMMITS = 60
+const NO_CHECKS: ReadonlyMap<string, CommitCheck> = new Map()
 
 type Props = {
   repo: string
@@ -20,10 +22,21 @@ type Props = {
   /** The branch head at the deadline, when the status is "changed after deadline". */
   atDeadlineOid: string | null
   changedAfter: boolean
+  /** What the padding check found, by commit id. */
+  checks?: ReadonlyMap<string, CommitCheck>
 }
 
 /** "Which date, which files": commits grouped by day, with the deadline ruled across. */
-export function Timeline({ repo, headOid, list, events, deadline, atDeadlineOid, changedAfter }: Props) {
+export function Timeline({
+  repo,
+  headOid,
+  list,
+  events,
+  deadline,
+  atDeadlineOid,
+  changedAfter,
+  checks = NO_CHECKS,
+}: Props) {
   const pushes = useMemo(() => attributePushes(list.commits, events ?? []), [list, events])
   const items = useMemo(() => buildTimeline(list.commits, deadline), [list, deadline])
   const lateCommits = useMemo(
@@ -86,6 +99,7 @@ export function Timeline({ repo, headOid, list, events, deadline, atDeadlineOid,
               push={pushes.get(item.commit.oid)}
               deadline={deadline}
               autoFiles={item.index < AUTO_FILE_COMMITS}
+              check={checks.get(item.commit.oid)}
             />
           )
         })}

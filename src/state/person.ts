@@ -56,12 +56,13 @@ async function sha256Hex(text: string): Promise<string> {
 
 const filePages = new Map<string, Promise<FilePage>>()
 
-export function loadFiles(repo: string, sha: string, page = 1): Promise<FilePage> {
+/** @param priority where the request waits in the queue; the first caller's choice holds for a page already on its way */
+export function loadFiles(repo: string, sha: string, page = 1, priority = 2): Promise<FilePage> {
   const cacheKey = `${repo}@${sha}#${page}`
   let result = filePages.get(cacheKey)
   if (!result) {
     result = (async () => {
-      const response = await client.get<CommitFilesResponse>(commitUrl({ repo, sha, page }), 2)
+      const response = await client.get<CommitFilesResponse>(commitUrl({ repo, sha, page }), priority)
       const files = await Promise.all(
         response.files.map(async (file) => ({
           ...file,

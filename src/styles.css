@@ -919,6 +919,40 @@ th.is-number .sort {
   line-height: 1.35;
 }
 
+/* Commits by person: who committed, and how many of their commits were padding. */
+.shares {
+  display: grid;
+  gap: 0.5rem;
+}
+.shares__status {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+}
+.shares__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.shares__table th,
+.shares__table td {
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
+}
+.shares__table th[scope='col'] {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.shares__table td,
+.shares__table th[scope='col']:not(:first-child) {
+  text-align: right;
+}
+
 .afterline {
   padding: 0.7rem 0.9rem;
   color: var(--warn);
@@ -1047,6 +1081,10 @@ th.is-number .sort {
 .tag--bad {
   color: var(--bad);
   background: var(--bad-bg);
+}
+.tag--warn {
+  color: var(--warn);
+  background: var(--warn-bg);
 }
 
 .files {

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CommitInfo } from '../../shared/api.ts'
 import { ApiError } from '../api/client.ts'
+import type { CommitCheck } from '../logic/padding.ts'
 import { repoUrl } from '../logic/people.ts'
 import { arrivedLate, type PushInfo } from '../logic/pushAttribution.ts'
 import { formatDateTime, formatTime } from '../logic/time.ts'
+import { checkCommit } from '../state/padding.ts'
 import { loadFiles, type FilePage } from '../state/person.ts'
 
 /** A commit made long before it was pushed is worth pointing out. */
@@ -32,9 +34,11 @@ type Props = {
   deadline: number | null
   /** Load the file list as soon as the commit is scrolled into view. */
   autoFiles: boolean
+  /** What the padding check found for this commit, once it has run. */
+  check?: CommitCheck
 }
 
-export function CommitEntry({ repo, commit, push, deadline, autoFiles }: Props) {
+export function CommitEntry({ repo, commit, push, deadline, autoFiles, check }: Props) {
   const holder = useRef<HTMLLIElement>(null)
   const [files, setFiles] = useState<FilesState>({ status: 'idle', pages: [] })
   const commitLink = `${repoUrl(repo)}/commit/${commit.oid}`
@@ -42,6 +46,8 @@ export function CommitEntry({ repo, commit, push, deadline, autoFiles }: Props) 
   const load = useCallback(
     (page: number) => {
       setFiles((previous) => ({ ...previous, status: 'loading' }))
+      // The check reads the same answer, so the whole screen learns what kind of commit this is.
+      if (page === 1) void checkCommit(repo, commit.oid)
       loadFiles(repo, commit.oid, page).then(
         (result) => setFiles((previous) => ({ status: 'ready', pages: [...previous.pages, result] })),
         (error: unknown) =>
@@ -97,6 +103,9 @@ export function CommitEntry({ repo, commit, push, deadline, autoFiles }: Props) 
           </a>
           {late ? <span className="tag tag--bad">After deadline</span> : null}
           {commit.parents.length > 1 ? <span className="tag">Merge</span> : null}
+          {check?.kind === 'whitespace' ? <span className="tag tag--warn">Only whitespace</span> : null}
+          {check?.kind === 'empty' ? <span className="tag tag--warn">No changes</span> : null}
+          {check?.tiny ? <span className="tag">Tiny</span> : null}
         </p>
         <p className="commit__meta">
           {commit.authorLogin ?? commit.authorName ?? 'Unknown author'}

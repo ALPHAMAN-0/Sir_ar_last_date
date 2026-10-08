@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import type { CommitCheck } from '../logic/padding.ts'
+import { checksOf, subscribe as subscribeChecks } from './padding.ts'
 import { getState, judgeRows, subscribe, type AppState, type PersonRow } from './store.ts'
 
 /** Reads one value from the store. The selector must return an existing value, not a new object. */
@@ -16,6 +18,11 @@ export function usePeople(): PersonRow[] {
     () => (sheet ? judgeRows(sheet, repos, activity, deadline) : []),
     [sheet, repos, activity, deadline],
   )
+}
+
+/** What the padding check found for a repo's commits, by commit id. Empty until a check ran. */
+export function useChecks(repo: string | null): ReadonlyMap<string, CommitCheck> {
+  return useSyncExternalStore(subscribeChecks, () => checksOf(repo))
 }
 
 function subscribeHash(listener: () => void): () => void {

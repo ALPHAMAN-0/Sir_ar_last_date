@@ -140,7 +140,10 @@ flowchart TD
 
 Open a person to see their commits grouped by date, the files each commit
 changed, and the deadline drawn across the timeline. Commits that reached GitHub
-after the deadline are marked, even when their own date says otherwise.
+after the deadline are marked, even when their own date says otherwise. Each
+commit is also checked for padding (see "Check commits" under the results
+report): one that changed only whitespace or no file at all is tagged, a tiny one
+too, and a table above the timeline sums them up per person.
 
 **First push** on that screen is the moment GitHub received the repo's first
 push; for a fork, the first push from its owner. GitHub has kept push times only
@@ -176,13 +179,28 @@ repos). A repo with more than 1,000 commits is counted from its newest 1,000 and
 the cell says so. When the commits could not be read, the cell says that; a repo
 without work has a blank cell.
 
+**Check commits** on the Register looks at what every commit of every repo on
+screen actually changed: the newest 200 commits of each repo, one request per
+commit, with a counter in the toolbar. A commit is *only whitespace* when, in
+every file it touched, the removed and added lines are the same once all spaces,
+tabs and blank lines are taken out; *empty* when it changed no file; *real*
+otherwise, and *tiny* when real but two lines or fewer. This is judged from the
+text of the changes, never from the commit message. After a check, the
+**Commits by person** cell carries the counts
+(`rahim 40 (67%): 12 real (5 tiny), 26 only whitespace, 2 empty`) and a number
+column **Padding commits** (whitespace-only plus empty, whole repo) stands after
+it, for sorting; it is blank for a repo that was not checked. A run that
+GitHub's hourly limit cuts short can be started again later: what was already
+read costs nothing for a week. A commit whose changes GitHub sends no text for
+(a picture, a very large file) is "not checked", never padding.
+
 | Sheet | One row per | Holds |
 |-------|-------------|-------|
-| Results | person | the register's columns (row, ID, name, repo, status, late by, repo created, last push, last commit, commits) with the first push between repo created and last push, then late in minutes, last on-time push, branch and commits by person |
+| Results | person | the register's columns (row, ID, name, repo, status, late by, repo created, last push, last commit, commits) with the first push between repo created and last push, then late in minutes, last on-time push, branch, commits by person and padding commits |
 | Summary | status | how many people have it and their share, who needs attention, who shares a repo, the deadline and check time |
 | Needs attention | late, changed, empty, missing or broken row | the most urgent first, with what to do about each |
 | Same repo | repo handed in by several people | their IDs, names, sheet rows and statuses |
-| Info | | how lateness is judged, what the first push and commits by person columns hold, and what each status means |
+| Info | | how lateness is judged, what the first push, commits by person and padding commits columns hold, and what each status means |
 
 On the Results and Needs attention sheets a person's whole row has the colour of
 their status: green on time, yellow changed after the deadline, red late or
@@ -471,7 +489,8 @@ What things cost in GitHub requests:
 |--------|------|
 | Checking a sheet of 200 people | about 10, plus one for each person who pushed after the deadline |
 | Downloading the results file | one per repo whose push log the register has not read, plus one per 100 commits of each repo (at most ten) for who committed; nothing the second time |
-| Opening a person | one per commit whose files are shown |
+| Check commits | one per commit, at most 200 per repo (plus one per 100 commits for a repo whose list was never read); nothing the second time within a week |
+| Opening a person | one per commit, for the padding check of the newest 200 (all of them on "Check all"); the files shown are the same answers |
 | Similarity, first time | one per repo; a repo too large to list at once costs a few more (never more than 41) |
 | Who had it first, per repo in a stronger pair | the push log (one, two for more than 100 pushes), the commit list (one per 100 commits), and one file list per push until the shared files have been seen: one or two for a repo that got them in one go, up to 40 for one that grew slowly |
 | Similarity, again | nothing, until someone pushes |
@@ -529,7 +548,7 @@ React, TypeScript and Vite, with the Cloudflare Vite plugin. The Excel library
 
 Every rule that decides something is a pure function with unit tests next to it
 (`*.test.ts`), and every screen has tests that click through it in a simulated
-browser (`*.test.tsx`, jsdom and Testing Library): 579 tests in 41 files. The
+browser (`*.test.tsx`, jsdom and Testing Library): 605 tests in 43 files. The
 tests replace `fetch` with a fake API (`src/test/fakeApi.ts` for the page), so
 they never call GitHub.
 

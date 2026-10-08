@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { CommitInfo } from '../../shared/api.ts'
 import type { CommitList } from '../state/person.ts'
-import { commitSharesText, countCommitShares, MAX_LISTED_AUTHORS } from './commitShares.ts'
+import { commitSharesText, countCommitShares, MAX_LISTED_AUTHORS, paddingCommits } from './commitShares.ts'
 import { firstPushText } from './firstPush.ts'
+import type { CommitCheck } from './padding.ts'
 
 type By = { login?: string | null; name?: string | null; merge?: boolean }
 
@@ -95,5 +96,49 @@ describe('who committed', () => {
     expect(commitSharesText({ kind: 'failed' })).toBe(firstPushText({ kind: 'failed' }))
     expect(commitSharesText({ kind: 'none' })).toBe('')
     expect(commitSharesText(countCommitShares(list([])))).toBe('')
+  })
+})
+
+describe('after a padding check', () => {
+  const check = (kind: CommitCheck['kind'], tiny = false): CommitCheck => ({ kind, tiny })
+
+  it("sorts each person's commits into real, tiny, only whitespace, empty and not checked", () => {
+    const [real, small, blank, nothing, unread, unread2] = times(6, { login: 'rahim' })
+    const other = commit({ login: 'nusrat' })
+    const checks = new Map([
+      [real.oid, check('real')],
+      [small.oid, check('real', true)],
+      [blank.oid, check('whitespace')],
+      [nothing.oid, check('empty')],
+      [unread.oid, check('unknown')],
+      [other.oid, check('real')],
+    ])
+    const shares = countCommitShares(list([real, small, blank, nothing, unread, unread2, other]), checks)
+    expect(shares).toMatchObject({
+      authors: [
+        { who: 'rahim', commits: 6, checked: { real: 2, tiny: 1, whitespace: 1, empty: 1, unknown: 2 } },
+        { who: 'nusrat', commits: 1, checked: { real: 1, tiny: 0, whitespace: 0, empty: 0, unknown: 0 } },
+      ],
+    })
+    expect(commitSharesText(shares)).toBe(
+      'rahim 6 (86%): 2 real (1 tiny), 1 only whitespace, 1 empty, 2 not checked; nusrat 1 (14%): 1 real',
+    )
+    expect(paddingCommits(shares)).toBe(2)
+  })
+
+  it('leaves out what was not found, but always says how many were real', () => {
+    const commits = times(3, { login: 'rahim' })
+    const checks = new Map(commits.map((item) => [item.oid, check('real')]))
+    expect(commitSharesText(countCommitShares(list(commits), checks))).toBe('rahim 3 (100%): 3 real')
+    expect(commitSharesText(countCommitShares(list(commits), new Map()))).toBe('rahim 3 (100%): 0 real, 3 not checked')
+  })
+
+  it('counts nothing, and has no padding number, without a check', () => {
+    const shares = countCommitShares(list(times(2, { login: 'rahim' })))
+    expect(shares.kind === 'counted' && shares.authors[0]).not.toHaveProperty('checked')
+    expect(paddingCommits(shares)).toBeNull()
+    expect(paddingCommits({ kind: 'failed' })).toBeNull()
+    expect(paddingCommits({ kind: 'none' })).toBeNull()
+    expect(paddingCommits(countCommitShares(list(times(2, { login: 'rahim' })), new Map()))).toBe(0)
   })
 })
