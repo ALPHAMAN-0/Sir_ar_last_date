@@ -188,6 +188,23 @@ describe('labels and links', () => {
     expect(rows.slice(2, 5).map((item) => item.firstPush.kind)).toEqual(['none', 'none', 'none'])
   })
 
+  it('gives each export row who committed on its repo, and says when that was not read', () => {
+    const counted = {
+      kind: 'counted' as const,
+      total: 2,
+      truncated: false,
+      authors: [{ who: 'rahim', login: 'rahim', commits: 2, merges: 0 }],
+    }
+    const rows = toExportRows(people, true, new Map(), new Map([['rahim/task', counted]]))
+    // Rahim and Zahid handed in the same repo.
+    expect(rows[0].commitShares).toEqual(counted)
+    expect(rows[5].commitShares).toBe(rows[0].commitShares)
+    // No work, no repo, no link: nobody's commits to count.
+    expect(rows.slice(2, 5).map((item) => item.commitShares.kind)).toEqual(['none', 'none', 'none'])
+    // A repo with work that was not read is written as not loaded.
+    expect(rows[1].commitShares).toEqual({ kind: 'failed' })
+  })
+
   it('falls back on what the register knows: a late row names its own first push', () => {
     const FIRST = '2026-10-05T21:00:00Z'
     const log = {

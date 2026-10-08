@@ -9,6 +9,7 @@ import {
   toExportRows,
 } from '../logic/people.ts'
 import { formatDateTime, zoneLabel } from '../logic/time.ts'
+import { loadCommitShares } from '../state/commitShares.ts'
 import { loadFirstPushes } from '../state/firstPushes.ts'
 import { useApp, useNow, usePeople } from '../state/hooks.ts'
 import {
@@ -41,8 +42,10 @@ export function Register() {
   const [picking, setPicking] = useState(false)
   const [confirmingClear, setConfirmingClear] = useState(false)
   const [downloadFailed, setDownloadFailed] = useState(false)
-  /** Set while a download waits for the first push of each repo. */
-  const [reading, setReading] = useState<{ done: number; total: number } | null>(null)
+  /** Set while a download waits for the first push, then the commits, of each repo. */
+  const [reading, setReading] = useState<{ what: 'first pushes' | 'commits'; done: number; total: number } | null>(
+    null,
+  )
 
   const deadlinePassed = deadline !== null && now > deadline
   const counts = useMemo(() => countByStatus(people), [people])
@@ -68,7 +71,11 @@ export function Register() {
       // The Excel library is fetched on first use.
       const excel = await import('../sheet/exportXlsx.ts')
       // The register does not know when a repo was first pushed. That is read now.
-      const firstPushes = await loadFirstPushes(shown, (done, total) => setReading({ done, total }))
+      const firstPushes = await loadFirstPushes(shown, (done, total) => setReading({ what: 'first pushes', done, total }))
+      // Replaced or removed while reading: nothing more is asked for a sheet no longer on screen.
+      if (getState().sheet !== sheet) return
+      // Who committed is not on the register either. The lists the first pushes needed are already here.
+      const commitShares = await loadCommitShares(shown, (done, total) => setReading({ what: 'commits', done, total }))
       const latest = getState()
       // Replaced or removed while reading: the file would be of a sheet no longer on screen.
       if (latest.sheet !== sheet) return
@@ -80,7 +87,7 @@ export function Register() {
         search.trim() ? `search: "${search.trim()}"` : '',
       ].filter(Boolean)
       excel.downloadWorkbook(
-        excel.buildWorkbook(toExportRows(rows, passed, firstPushes), {
+        excel.buildWorkbook(toExportRows(rows, passed, firstPushes, commitShares), {
           sheetName: sheet.fileName,
           deadline: latest.deadline,
           checkedAt: latest.checkedAt ?? stamp,
@@ -214,7 +221,7 @@ export function Register() {
         </label>
         <p className="toolbar__checked" aria-live="polite">
           {reading
-            ? `Reading first pushes for the file: ${reading.done} of ${reading.total} repos`
+            ? `Reading ${reading.what} for the file: ${reading.done} of ${reading.total} repos`
             : checking
               ? loadingRepos > 0
                 ? `Checking ${repoCount - loadingRepos} of ${repoCount} repos`

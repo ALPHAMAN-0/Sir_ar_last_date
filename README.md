@@ -164,13 +164,25 @@ has no push time, the date of the first commit is given and marked
 `(commit date)`. The notes that the register shows under a status are not in
 the file.
 
+The file also has one column the register does not: **Commits by person**, after
+**Branch**. For each repo it names everyone who committed on the main branch,
+with their number of commits and their share of all commits, the largest share
+first: `rahim 8 (67%, 2 merges); nusrat 4 (33%)`. A person is named by their
+GitHub login, or by the name written in the commit when GitHub cannot tell whose
+it is, as on the person's own page. Merge commits count like any other and are
+shown. The commits are read when the button is pressed, after the first pushes
+(one request per 100 commits of a repo, at most ten; the toolbar counts the
+repos). A repo with more than 1,000 commits is counted from its newest 1,000 and
+the cell says so. When the commits could not be read, the cell says that; a repo
+without work has a blank cell.
+
 | Sheet | One row per | Holds |
 |-------|-------------|-------|
-| Results | person | the register's columns (row, ID, name, repo, status, late by, repo created, last push, last commit, commits) with the first push between repo created and last push, then late in minutes, last on-time push and branch |
+| Results | person | the register's columns (row, ID, name, repo, status, late by, repo created, last push, last commit, commits) with the first push between repo created and last push, then late in minutes, last on-time push, branch and commits by person |
 | Summary | status | how many people have it and their share, who needs attention, who shares a repo, the deadline and check time |
 | Needs attention | late, changed, empty, missing or broken row | the most urgent first, with what to do about each |
 | Same repo | repo handed in by several people | their IDs, names, sheet rows and statuses |
-| Info | | how lateness is judged and what each status means |
+| Info | | how lateness is judged, what the first push and commits by person columns hold, and what each status means |
 
 On the Results and Needs attention sheets a person's whole row has the colour of
 their status: green on time, yellow changed after the deadline, red late or
@@ -458,6 +470,7 @@ What things cost in GitHub requests:
 | Action | Cost |
 |--------|------|
 | Checking a sheet of 200 people | about 10, plus one for each person who pushed after the deadline |
+| Downloading the results file | one per repo whose push log the register has not read, plus one per 100 commits of each repo (at most ten) for who committed; nothing the second time |
 | Opening a person | one per commit whose files are shown |
 | Similarity, first time | one per repo; a repo too large to list at once costs a few more (never more than 41) |
 | Who had it first, per repo in a stronger pair | the push log (one, two for more than 100 pushes), the commit list (one per 100 commits), and one file list per push until the shared files have been seen: one or two for a repo that got them in one go, up to 40 for one that grew slowly |
@@ -516,7 +529,7 @@ React, TypeScript and Vite, with the Cloudflare Vite plugin. The Excel library
 
 Every rule that decides something is a pure function with unit tests next to it
 (`*.test.ts`), and every screen has tests that click through it in a simulated
-browser (`*.test.tsx`, jsdom and Testing Library): 516 tests in 38 files. The
+browser (`*.test.tsx`, jsdom and Testing Library): 579 tests in 41 files. The
 tests replace `fetch` with a fake API (`src/test/fakeApi.ts` for the page), so
 they never call GitHub.
 

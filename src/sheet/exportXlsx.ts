@@ -1,13 +1,14 @@
 // The register's download: a results report as an Excel workbook. Loaded only
 // when the Download button is pressed, because the Excel library is large.
 //
-//   Results          the register as it is on screen, one row per person, with each repo's first push
+//   Results          the register as it is on screen, one row per person, with each repo's first push and who committed
 //   Summary          how many people have each status, at a glance
 //   Needs attention  late, changed, empty, missing and broken rows, with what to do
 //   Same repo        repos that more than one person handed in
 //   Info             when and how the file was made, and what each status means
 
 import * as XLSX from 'xlsx'
+import { commitSharesText, type CommitShares } from '../logic/commitShares.ts'
 import { firstPushText, type FirstPush } from '../logic/firstPush.ts'
 import { STATUS_TONE } from '../logic/people.ts'
 import type { Status } from '../logic/verdict.ts'
@@ -35,6 +36,8 @@ export type ExportRow = {
   lastCommitAt: string | null
   commits: number | null
   branch: string
+  /** Who committed on the main branch, read for the download like the first push. */
+  commitShares: CommitShares
 }
 
 export type ExportInfo = {
@@ -166,6 +169,8 @@ const RESULT_COLUMNS: ReadonlyArray<Column<ExportRow>> = [
   { title: 'Late (minutes)', width: 14, cell: (row) => number(row.lateMinutes) },
   { title: 'Last on-time push', width: 21, cell: (row) => excelDate(row.lastOnTimePushAt) },
   { title: 'Branch', width: 12, cell: (row) => text(row.branch) },
+  // Last, so that no column of the register moves: who committed, with each person's share.
+  { title: 'Commits by person', width: 60, cell: (row) => text(commitSharesText(row.commitShares)) },
 ]
 
 /** Statuses that ask the teacher to do something, most urgent first. */
@@ -383,6 +388,12 @@ function infoSheet(info: ExportInfo): XLSX.WorkSheet {
       'First push',
       text(
         'When GitHub first received work in the repo; for a fork, the first push from its owner. GitHub has kept push times only since March 2023. For older work the date of the first commit is given, marked "(commit date)".',
+      ),
+    ],
+    [
+      'Commits by person',
+      text(
+        "Who committed on the main branch, with each person's commits and share of all commits, the largest share first; merge commits count and are shown. A person is named by their GitHub login, or by the name written in the commit when GitHub cannot tell whose it is. Counted from the newest 1,000 commits at most; the cell says when a repo has more.",
       ),
     ],
     ...MEANING.map(([label, meaning]): [string, XLSX.CellObject] => [`Status: ${label}`, text(meaning)]),

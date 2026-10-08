@@ -38,6 +38,7 @@ const row = (over: Partial<ExportRow> = {}): ExportRow => ({
   lastCommitAt: '2026-10-05T15:09:00Z',
   commits: 12,
   branch: 'main',
+  commitShares: { kind: 'counted', total: 12, truncated: false, authors: [{ who: 'rahim', login: 'rahim', commits: 12, merges: 0 }] },
   ...over,
 })
 
@@ -92,7 +93,7 @@ describe('the results report', () => {
   it('has the columns of the register in the register\'s order with the first push among the dates, then the extra ones', () => {
     expect(roundTrip([row()]).grid('Results')[0]).toEqual([
       'Row', 'ID', 'Name', 'Repo', 'Status', 'Late by', 'Repo created', 'First push', 'Last push', 'Last commit', 'Commits',
-      'Late (minutes)', 'Last on-time push', 'Branch',
+      'Late (minutes)', 'Last on-time push', 'Branch', 'Commits by person',
     ])
   })
 
@@ -157,17 +158,17 @@ describe('the results report', () => {
     expect(fill(results.E7)).toBe('E6E6E6') // Invalid link
     const xml = sheetXml(bytes, 1)
     expect(xml).toContain('state="frozen"')
-    expect(xml).toContain('<autoFilter ref="A1:N9"/>')
+    expect(xml).toContain('<autoFilter ref="A1:O9"/>')
   })
 
   it('colours the whole row of a person, blank cells and dates included', () => {
     process.env.TZ = 'Asia/Dhaka'
     const { results } = roundTrip(klass)
-    expect(rowFills(results, 2, 'N')).toEqual(['D4EFDB']) // On time
-    expect(rowFills(results, 5, 'N')).toEqual(['F6CDC8']) // Late
-    expect(rowFills(results, 6, 'N')).toEqual(['FBE6B3']) // Changed after deadline
-    expect(rowFills(results, 7, 'N')).toEqual(['E6E6E6']) // Invalid link
-    expect(rowFills(results, 8, 'N')).toEqual(['E6E6E6']) // Not found
+    expect(rowFills(results, 2, 'O')).toEqual(['D4EFDB']) // On time
+    expect(rowFills(results, 5, 'O')).toEqual(['F6CDC8']) // Late
+    expect(rowFills(results, 6, 'O')).toEqual(['FBE6B3']) // Changed after deadline
+    expect(rowFills(results, 7, 'O')).toEqual(['E6E6E6']) // Invalid link
+    expect(rowFills(results, 8, 'O')).toEqual(['E6E6E6']) // Not found
     // A coloured date is still a date, and a coloured link still a link.
     expect(results.I5.w).toBe('05 Oct 2026, 21:10')
     expect(results.D5.l?.Target).toBe('https://github.com/x/A4')
@@ -179,9 +180,9 @@ describe('the results report', () => {
       row({ status: 'Has work', statusKey: 'submitted' }),
       row({ status: 'Checking', statusKey: 'checking' }),
     ])
-    expect(rowFills(results, 2, 'N')).toEqual(['F6CDC8'])
-    expect(rowFills(results, 3, 'N')).toEqual(['DCE8F7'])
-    expect(rowFills(results, 4, 'N')).toEqual([undefined])
+    expect(rowFills(results, 2, 'O')).toEqual(['F6CDC8'])
+    expect(rowFills(results, 3, 'O')).toEqual(['DCE8F7'])
+    expect(rowFills(results, 4, 'O')).toEqual([undefined])
   })
 
   it('colours whole rows on the "Needs attention" sheet too', () => {
@@ -275,15 +276,59 @@ describe('the results report', () => {
     expect(results.H5.v).toBe('Could not be loaded')
   })
 
+  it("lists who committed after the branch, with each person's share, the largest first", () => {
+    const { results } = roundTrip([
+      row({
+        commitShares: {
+          kind: 'counted',
+          total: 12,
+          truncated: false,
+          authors: [
+            { who: 'rahim', login: 'rahim', commits: 8, merges: 2 },
+            { who: 'nusrat', login: 'nusrat', commits: 4, merges: 0 },
+          ],
+        },
+      }),
+    ])
+    expect(results.O1.v).toBe('Commits by person')
+    expect(results.O2).toMatchObject({ t: 's', v: 'rahim 8 (67%, 2 merges); nusrat 4 (33%)' })
+  })
+
+  it('says in words when the commits could not be read, marks a cut-off list, and is blank for a repo without work', () => {
+    const { results } = roundTrip([
+      row({ commitShares: { kind: 'failed' } }),
+      row({
+        commitShares: { kind: 'counted', total: 1000, truncated: true, authors: [{ who: 'a', login: 'a', commits: 1000, merges: 0 }] },
+      }),
+      row({ status: 'No submission', statusKey: 'no_submission', commits: null, commitShares: { kind: 'none' } }),
+    ])
+    expect(results.O2.v).toBe('Could not be loaded')
+    expect(results.O3.v).toMatch(/ \(of the newest 1,000 commits\)$/)
+    expect(results.O4?.v ?? '').toBe('')
+  })
+
   it('never writes a formula, even when a cell starts with "="', () => {
     const { results } = roundTrip([
-      row({ name: '=HYPERLINK("https://evil.example","click")', repoName: '+1+1', repoUrl: null, id: '@SUM(A1)' }),
+      row({
+        name: '=HYPERLINK("https://evil.example","click")',
+        repoName: '+1+1',
+        repoUrl: null,
+        id: '@SUM(A1)',
+        // A commit's author name comes from GitHub's data, written by whoever made the commit.
+        commitShares: {
+          kind: 'counted',
+          total: 1,
+          truncated: false,
+          authors: [{ who: '=HYPERLINK("https://evil.example","x")', login: null, commits: 1, merges: 0 }],
+        },
+      }),
     ])
-    for (const address of ['B2', 'C2', 'D2']) {
+    for (const address of ['B2', 'C2', 'D2', 'O2']) {
       expect(results[address].t, address).toBe('s')
       expect(results[address].f, address).toBeUndefined()
     }
     expect(results.C2.v).toBe('=HYPERLINK("https://evil.example","click")')
+    expect(results.O2.v).toBe('=HYPERLINK("https://evil.example","x") 1 (100%)')
   })
 
   it('leaves unknown values blank and writes late minutes as a number', () => {
@@ -328,6 +373,7 @@ describe('the results report', () => {
     expect(about.B4.v).toBe('Asia/Dhaka (UTC+6)')
     expect(grid('Info').map((line) => line[0])).toContain('Status: Changed after deadline')
     expect(grid('Info').find((line) => line[0] === 'First push')?.[1]).toContain('marked "(commit date)"')
+    expect(grid('Info').find((line) => line[0] === 'Commits by person')?.[1]).toContain('newest 1,000')
     expect(roundTrip([row()], { ...info, deadline: null }).about.B2.v).toBe('No deadline set')
   })
 })

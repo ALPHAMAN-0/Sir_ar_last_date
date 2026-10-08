@@ -39,6 +39,10 @@ rewrite (deployed 2026-10-06, version 4f73fa07).
 - [x] Results report (2026-10-07): the Notes columns are gone, and a First push date
       stands between Repo created and Last push. It is read when Download is pressed,
       the same way the person screen reads it (see README, "The results report").
+- [x] Results report (2026-10-08): a **Commits by person** column after Branch, who
+      committed on the main branch with their commits and share, merges included and
+      shown. Read when Download is pressed, after the first pushes, from the same commit
+      lists the person screen uses (see README, "The results report").
 
 ## Not done
 - [ ] Go online from GitHub Actions only when the tests pass (2026-10-07). The

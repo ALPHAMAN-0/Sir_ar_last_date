@@ -179,6 +179,30 @@ describe('the register', () => {
       expect(results.I3.v).toBeCloseTo(serial('2026-10-01T08:00:00Z'), 8)
     })
 
+    it('writes after the branch who committed on each repo, with their share of its commits', async () => {
+      const commit = (seed: string, parents: string[], login: string, at: string) => ({
+        oid: oid(seed), committedAt: at, authoredAt: at, headline: seed, parents, authorName: null, authorLogin: login,
+      })
+      fake.api.commits['octocat/hello-world'] = [
+        commit('merge', [oid('two'), oid('side')], 'rahim', '2026-09-30T10:00:00Z'),
+        commit('two', [oid('one')], 'rahim', '2026-09-29T10:00:00Z'),
+        commit('one', [], 'nusrat', '2026-09-28T10:00:00Z'),
+      ]
+      fake.api.commits['octocat/spoon-knife'] = [commit('only', [], 'nusrat', '2026-09-28T10:00:00Z')]
+      await openRegister()
+      fireEvent.click(screen.getByRole('button', { name: 'Download .xlsx' }))
+      await waitFor(() => expect(saved).toHaveLength(1))
+
+      const results = XLSX.read(saved[0].bytes, { type: 'array' }).Sheets.Results
+      const header = XLSX.utils.sheet_to_json<string[]>(results, { header: 1 })[0]
+      expect(header.at(-1)).toBe('Commits by person')
+      // On screen order: Nusrat, Rahim, then the two rows without a repo.
+      expect([results.O2.v, results.O3.v]).toEqual(['nusrat 1 (100%)', 'rahim 2 (67%, 1 merge); nusrat 1 (33%)'])
+      expect([results.O4?.v ?? '', results.O5?.v ?? '']).toEqual(['', ''])
+      // Each list was read once: the first pushes and who committed use the same one.
+      expect(fake.paths().filter((path) => path === '/api/v1/commits')).toHaveLength(2)
+    })
+
     it('asks GitHub only about the repos that go into the file', async () => {
       await openRegister()
       search('spoon')
@@ -209,6 +233,8 @@ describe('the register', () => {
       expect(screen.queryByRole('alert')).toBeNull()
       // Without a deadline a failed log changes nobody's status.
       expect([results.E2.v, results.E3.v]).toEqual(['Has work', 'Has work'])
+      // Neither repo has commits to read here either.
+      expect([results.O2.v, results.O3.v]).toEqual(['Could not be loaded', 'Could not be loaded'])
     })
 
     /** Holds back every push log until `release()`, as a slow network would. */
@@ -240,6 +266,43 @@ describe('the register', () => {
       await waitFor(() => expect(saved).toHaveLength(1))
       expect(await screen.findByText(`Checked ${formatDateTime(FETCHED_AT)}`)).toBeTruthy()
       expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(false)
+      expect((screen.getByRole('button', { name: 'Download .xlsx' }) as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    /** Holds back every commit list until `release()`, as a slow network would. */
+    function holdCommits() {
+      let release = () => {}
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const answer = fake.fetch.getMockImplementation() as typeof fetch
+      fake.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+        if (String(input).includes('/api/v1/commits')) await held
+        return answer(input)
+      })
+      return () => release()
+    }
+
+    it('says how far the commits are read once the first pushes are in, and keeps the buttons still', async () => {
+      // Both logs name the first push, so the commits are read for the new column only.
+      for (const repo of ['octocat/hello-world', 'octocat/spoon-knife']) {
+        fake.api.activity[repo] = [
+          { ts: '2026-09-02T09:00:00Z', type: 'branch_creation', ref: 'refs/heads/main', before: ZERO_OID, after: oid(repo), actor: 'someone' },
+        ]
+      }
+      const release = holdCommits()
+      await openRegister()
+      fireEvent.click(screen.getByRole('button', { name: 'Download .xlsx' }))
+
+      expect(await screen.findByText(/^Reading commits for the file: \d of 3 repos$/)).toBeTruthy()
+      expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(true)
+      expect((screen.getByRole('button', { name: 'Download .xlsx' }) as HTMLButtonElement).disabled).toBe(true)
+      expect(saved).toHaveLength(0)
+      expect(fake.paths().filter((path) => path === '/api/v1/commits')).toHaveLength(2)
+
+      release()
+      await waitFor(() => expect(saved).toHaveLength(1))
+      expect(await screen.findByText(`Checked ${formatDateTime(FETCHED_AT)}`)).toBeTruthy()
       expect((screen.getByRole('button', { name: 'Download .xlsx' }) as HTMLButtonElement).disabled).toBe(false)
     })
 
@@ -490,7 +553,8 @@ describe('the register with a deadline', () => {
       await download()
       // Only the on-time repo was still unread.
       expect(logs()).toBe(3)
-      expect(fake.paths().filter((path) => path === '/api/v1/commits')).toHaveLength(1)
+      // Rahim's commits, read for his first push, serve for who committed too; the other two repos are asked once each.
+      expect(fake.paths().filter((path) => path === '/api/v1/commits')).toHaveLength(3)
     })
 
     it('shows in the file the same first push as on each person\'s own page', async () => {

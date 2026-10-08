@@ -5,6 +5,7 @@ import type { RepoOk } from '../../shared/api.ts'
 import { LINK_PROBLEM_TEXT } from '../sheet/parseRepoLink.ts'
 import type { ExportRow } from '../sheet/exportXlsx.ts'
 import type { PersonRow, Sort } from '../state/store.ts'
+import type { CommitShares } from './commitShares.ts'
 import { firstPush, type FirstPush } from './firstPush.ts'
 import { apiRepoName } from './repoName.ts'
 import { formatDuration } from './time.ts'
@@ -163,17 +164,23 @@ export function repoLinkFor(person: PersonRow): string {
 /**
  * @param firstPushes by repo, read for the download. A repo that is missing
  *   gets what the register itself knows, which is the first push of a late row.
+ * @param commitShares by repo, read for the download. A repo with work that is
+ *   missing is written as not loaded: the file is finished, nothing more is read.
  */
 export function toExportRows(
   people: readonly PersonRow[],
   deadlinePassed: boolean,
   firstPushes: ReadonlyMap<string, FirstPush> = new Map(),
+  commitShares: ReadonlyMap<string, CommitShares> = new Map(),
 ): ExportRow[] {
   return people.map((person) => {
     const meta = okMeta(person)
     const { verdict, row } = person
     const hasWork = meta !== null && !meta.isEmpty
     const url = repoLinkFor(person)
+    const shares: CommitShares =
+      (row.link.ok ? commitShares.get(row.link.key) : undefined) ??
+      (meta !== null && verdict.status !== 'no_submission' ? { kind: 'failed' } : { kind: 'none' })
     return {
       rowNumber: row.rowNumber,
       id: row.id,
@@ -192,6 +199,7 @@ export function toExportRows(
       lastCommitAt: meta?.headCommittedAt ?? null,
       commits: hasWork ? meta.totalCommits : null,
       branch: meta?.defaultBranch ?? '',
+      commitShares: shares,
     }
   })
 }
