@@ -142,6 +142,17 @@ describe('commits and commit queries', () => {
     expect(parseCommitQuery(`?repo=a%2Fx&sha=${SHA}&page=31`)).toBeNull()
     expect(parseCommitQuery(`?repo=a%2Fx&sha=main`)).toBeNull()
   })
+
+  it('rejects a branch name where /commits expects a SHA', () => {
+    // The SingleCheck panel needs to read commits from every branch in
+    // meta.branches.names. The /commits route only accepts a SHA `ref`, so
+    // a branch name like "main" is rejected with bad_request — the symptom
+    // the user sees is "Contributors could not be loaded" on any real repo.
+    // This test pins the contract so the fix cannot quietly regress back
+    // to "accepts anything".
+    expect(parseCommitsQuery('?repo=a%2Fx&ref=main')).toBeNull()
+    expect(parseCommitsQuery('?repo=a%2Fx&ref=feature%2Flogin')).toBeNull()
+  })
 })
 
 describe('tree query', () => {

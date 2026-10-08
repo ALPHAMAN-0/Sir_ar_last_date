@@ -1,9 +1,11 @@
 // One-off repo inspection: takes a pasted GitHub link, asks the Worker for the
 // repo's facts, and joins them with the oldest push on the default branch,
 // the files changed in the head commit, the repo's branches, and the
-// contributors breakdown across every branch. Pure TypeScript so a test can
-// drive it with a stubbed `get` and the screen can pass the page-wide
-// `client.get`.
+// contributors breakdown. The contributors breakdown reads one page of the
+// default branch's history (the same source the results report and the
+// PersonView use), so the wording matches the rest of the app. Pure
+// TypeScript so a test can drive it with a stubbed `get` and the screen can
+// pass the page-wide `client.get`.
 
 import {
   activityUrl,
@@ -52,22 +54,19 @@ export async function runSingleCheck(
   // From here `meta` is `RepoOk`.
   const branch = meta.defaultBranch ?? 'main'
   const headOid = meta.headOid ?? ''
-  // Fan the contributors fetch out across every branch the Worker reported,
-  // so a commit that lands on two branches is still counted once. Fall back
-  // to the default branch when the Worker did not say (older answer, or a
-  // brand-new repo with no head yet).
-  const branchNames = meta.branches?.names?.length ? meta.branches.names : [branch]
 
   const [activityResult, filesResult, commitsResult] = await Promise.allSettled([
     get<ActivityResponse>(activityUrl({ repo: key, v: meta.createdAt, ref: branch, asc: true }), 0),
     headOid
       ? get<CommitFilesResponse>(commitUrl({ repo: key, sha: headOid }), 1)
       : Promise.resolve<CommitFilesResponse | null>(null),
+    // The /commits route only accepts a SHA `ref` (the GraphQL variable is
+    // `GitObjectID`, not `String`), so we ask for one page of history behind
+    // the head OID. The dedup-by-oid fan-out we did before was rejected by
+    // the Worker on every branch.
     headOid
-      ? Promise.allSettled(
-          branchNames.map((ref) => get<CommitsResponse>(commitsUrl({ repo: key, ref }), 0)),
-        )
-      : Promise.resolve<PromiseSettledResult<CommitsResponse>[]>([]),
+      ? get<CommitsResponse>(commitsUrl({ repo: key, ref: headOid }), 0)
+      : Promise.resolve<CommitsResponse | null>(null),
   ])
 
   // Activity is required: the spec lists "first push" as a core fact. A repo
@@ -80,30 +79,20 @@ export async function runSingleCheck(
   const files: CommitFilesResponse | null =
     filesResult.status === 'fulfilled' ? filesResult.value : null
 
-  // Dedup the contributors fan-out by commit oid: a commit that exists on
-  // multiple branches is one commit, not two. An empty `commitsResult` means
-  // the repo had no head (new repo, no work yet), which is success not
-  // failure — leave the cell blank, and don't flag it as a load error.
-  const seenOids = new Set<string>()
+  // Contributors: one page of the default branch's history. The dedup-by-oid
+  // pass is now redundant (one call), but the variables keep the wording
+  // uniform if we later add per-branch pages.
   const allCommits: CommitInfo[] = []
-  const perBranchCommits = commitsResult.status === 'fulfilled' ? commitsResult.value : []
-  let anyCommitOk = false
-  let truncated = false
-  for (const r of perBranchCommits) {
-    if (r.status !== 'fulfilled') continue
-    anyCommitOk = true
-    if (r.value.next !== null) truncated = true
-    for (const commit of r.value.commits) {
-      if (seenOids.has(commit.oid)) continue
-      seenOids.add(commit.oid)
-      allCommits.push(commit)
-    }
+  const commits = commitsResult.status === 'fulfilled' ? commitsResult.value : null
+  if (commits) {
+    for (const commit of commits.commits) allCommits.push(commit)
   }
-  const contributors = anyCommitOk
-    ? commitSharesText(countCommitShares({ commits: allCommits, truncated }))
+  const contributors = commits
+    ? commitSharesText(
+        countCommitShares({ commits: allCommits, truncated: commits.next !== null }),
+      )
     : ''
-  const contributorsFailed =
-    perBranchCommits.length > 0 && perBranchCommits.every((r) => r.status === 'rejected')
+  const contributorsFailed = headOid !== '' && commitsResult.status === 'rejected'
 
   return {
     key,

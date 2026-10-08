@@ -82,7 +82,7 @@ beforeEach(() => {
     repos: { [KEY]: REPO },
     activity: { [KEY]: ACTIVITY },
     files: { [HEAD]: FILES_RESPONSE },
-    commits: { [`${KEY}@main`]: COMMITS },
+    commits: { [`${KEY}@${HEAD}`]: COMMITS },
   })
 })
 
@@ -192,7 +192,7 @@ describe('SingleCheck', () => {
       repos: { [KEY]: REPO },
       activity: { [KEY]: ACTIVITY },
       files: { [HEAD]: { sha: HEAD, stats: null, files: manyFiles, more: false, tooLarge: false } },
-      commits: { [`${KEY}@main`]: COMMITS },
+      commits: { [`${KEY}@${HEAD}`]: COMMITS },
     })
     await renderSingleCheck()
     fireEvent.change(inputLink(), { target: { value: 'octocat/Hello-World' } })
@@ -216,7 +216,7 @@ describe('SingleCheck', () => {
       files: {
         [HEAD]: { sha: HEAD, stats: null, files: FILES, more: true, tooLarge: false },
       },
-      commits: { [`${KEY}@main`]: COMMITS },
+      commits: { [`${KEY}@${HEAD}`]: COMMITS },
     })
     await renderSingleCheck()
     fireEvent.change(inputLink(), { target: { value: 'octocat/Hello-World' } })
@@ -268,7 +268,7 @@ describe('SingleCheck', () => {
       repos: { [KEY]: repoWithBranches },
       activity: { [KEY]: ACTIVITY },
       files: { [HEAD]: FILES_RESPONSE },
-      commits: { [`${KEY}@main`]: COMMITS },
+      commits: { [`${KEY}@${HEAD}`]: COMMITS },
     })
     await renderSingleCheck()
     fireEvent.change(inputLink(), { target: { value: 'octocat/Hello-World' } })

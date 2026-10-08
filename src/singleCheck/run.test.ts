@@ -82,9 +82,11 @@ const COMMITS: CommitInfo[] = [
     authorLogin: 'nusrat',
   },
 ]
-/** One page of commits per branch the SingleCheck asks about. */
+/** One page of commits behind the head commit, keyed by the SHA ref the
+ *  SingleCheck now sends (the /commits route only accepts SHAs, not branch
+ *  names). */
 const COMMITS_BY_BRANCH: Record<string, CommitInfo[]> = {
-  [`${KEY}@main`]: COMMITS,
+  [`${KEY}@${HEAD}`]: COMMITS,
 }
 
 const isResult = (value: SingleCheckResult | SingleCheckError): value is SingleCheckResult =>
@@ -236,12 +238,12 @@ describe('runSingleCheck', () => {
     expect(result.branches).toBeNull()
   })
 
-  it('builds the contributors text from one branch of commits', async () => {
+  it('builds the contributors text from the head commit of the default branch', async () => {
     stubApi({
       repos: { [KEY]: REPO },
       activity: ACTIVITY_BY_KEY,
       files: { [HEAD]: FILES_RESPONSE },
-      commits: { [`${KEY}@main`]: COMMITS },
+      commits: { [`${KEY}@${HEAD}`]: COMMITS },
     })
 
     const result = await runSingleCheck('octocat/Hello-World')
@@ -250,7 +252,13 @@ describe('runSingleCheck', () => {
     expect(result.contributorsFailed).toBe(false)
   })
 
-  it('dedupes the same commit across two branches so it is counted once', async () => {
+  it('asks /commits for the head OID, not a branch name (regression: the Worker only accepts SHAs)', async () => {
+    // A repo with multiple branches. The orchestrator must NOT ask for
+    // /commits?ref=main or /commits?ref=dev — the Worker's parser only
+    // accepts SHA refs, so a branch name is rejected with bad_request and
+    // every call fails. The bug surfaced as "Contributors could not be
+    // loaded" on any real repo. We verify by asking the fake what URLs
+    // were hit.
     const repoWithTwoBranches: RepoOk = okRepo(KEY, {
       nameWithOwner: 'octocat/Hello-World',
       defaultBranch: 'main',
@@ -259,26 +267,29 @@ describe('runSingleCheck', () => {
       pushedAt: '2026-10-01T08:00:00Z',
       branches: { total: 2, names: ['dev', 'main'] },
     })
-    stubApi({
+    const { fetch } = stubApi({
       repos: { [KEY]: repoWithTwoBranches },
       activity: ACTIVITY_BY_KEY,
       files: { [HEAD]: FILES_RESPONSE },
-      // Both branches have all three commits; the dedup should keep them once.
-      commits: {
-        [`${KEY}@main`]: COMMITS,
-        [`${KEY}@dev`]: COMMITS,
-      },
+      commits: { [`${KEY}@${HEAD}`]: COMMITS },
     })
 
     const result = await runSingleCheck('octocat/Hello-World')
     if (!isResult(result)) throw new Error(`expected a result, got ${result.kind}`)
-    // Same totals as the single-branch case: 2 rahim, 1 nusrat.
     expect(result.contributors).toBe('rahim 2 (67%, 1 merge); nusrat 1 (33%)')
     expect(result.contributorsFailed).toBe(false)
+
+    // Exactly one /commits call, and its ref is the head SHA — not a branch
+    // name. The branch name appears nowhere in the /commits URL.
+    const urls = fetch.mock.calls.map(([input]) => String(input))
+    const commitsUrls = urls.filter((u) => u.includes('/api/v1/commits'))
+    expect(commitsUrls).toHaveLength(1)
+    expect(commitsUrls[0]).toContain(`ref=${HEAD}`)
+    expect(commitsUrls[0]).not.toMatch(/ref=(main|dev)(&|$)/)
   })
 
-  it('flags contributorsFailed when every per-branch /commits call rejects', async () => {
-    // No commits seeded: the fake answers 404 on every /commits call.
+  it('flags contributorsFailed when the /commits call rejects', async () => {
+    // No commits seeded: the fake answers 404 on /commits.
     stubApi({
       repos: { [KEY]: REPO },
       activity: ACTIVITY_BY_KEY,
