@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import type {
   ActivityEvent,
   CommitFilesResponse,
+  CommitInfo,
   FileChange,
   RepoOk,
 } from '../../shared/api.ts'
@@ -51,6 +52,41 @@ const ACTIVITY_BY_KEY: Record<string, ActivityEvent[]> = {
   [KEY]: ACTIVITY_NEWEST_FIRST,
 }
 
+/** Two commits by two different authors, used to build the contributors text. */
+const COMMITS: CommitInfo[] = [
+  {
+    oid: '1'.repeat(40),
+    committedAt: '2026-10-01T10:00:00Z',
+    authoredAt: '2026-10-01T10:00:00Z',
+    headline: 'add login',
+    parents: ['0'.repeat(40)],
+    authorName: null,
+    authorLogin: 'rahim',
+  },
+  {
+    oid: '2'.repeat(40),
+    committedAt: '2026-09-15T10:00:00Z',
+    authoredAt: '2026-09-15T10:00:00Z',
+    headline: 'merge',
+    parents: ['0'.repeat(40), '3'.repeat(40)],
+    authorName: null,
+    authorLogin: 'rahim',
+  },
+  {
+    oid: '3'.repeat(40),
+    committedAt: '2026-09-01T10:00:00Z',
+    authoredAt: '2026-09-01T10:00:00Z',
+    headline: 'first commit',
+    parents: ['0'.repeat(40)],
+    authorName: null,
+    authorLogin: 'nusrat',
+  },
+]
+/** One page of commits per branch the SingleCheck asks about. */
+const COMMITS_BY_BRANCH: Record<string, CommitInfo[]> = {
+  [`${KEY}@main`]: COMMITS,
+}
+
 const isResult = (value: SingleCheckResult | SingleCheckError): value is SingleCheckResult =>
   !('kind' in value)
 
@@ -60,6 +96,7 @@ describe('runSingleCheck', () => {
       repos: { [KEY]: REPO },
       activity: ACTIVITY_BY_KEY,
       files: { [HEAD]: FILES_RESPONSE },
+      commits: COMMITS_BY_BRANCH,
     })
 
     const result = await runSingleCheck('octocat/Hello-World')
@@ -79,6 +116,9 @@ describe('runSingleCheck', () => {
     ])
     expect(result.filesTruncated).toBe(false)
     expect(result.filesTooLarge).toBe(false)
+    expect(result.branches).toEqual({ total: 1, names: ['main'] })
+    expect(result.contributors).toBe('rahim 2 (67%, 1 merge); nusrat 1 (33%)')
+    expect(result.contributorsFailed).toBe(false)
   })
 
   it('accepts a full https URL and reaches the same answer', async () => {
@@ -86,6 +126,7 @@ describe('runSingleCheck', () => {
       repos: { [KEY]: REPO },
       activity: ACTIVITY_BY_KEY,
       files: { [HEAD]: FILES_RESPONSE },
+      commits: COMMITS_BY_BRANCH,
     })
 
     const result = await runSingleCheck('https://github.com/octocat/Hello-World')
@@ -117,6 +158,7 @@ describe('runSingleCheck', () => {
       repos: { [KEY]: REPO },
       activity: { [KEY]: [] },
       files: { [HEAD]: FILES_RESPONSE },
+      commits: COMMITS_BY_BRANCH,
     })
 
     const result = await runSingleCheck('octocat/Hello-World')
@@ -136,6 +178,7 @@ describe('runSingleCheck', () => {
       repos: { [KEY]: REPO },
       activity: ACTIVITY_BY_KEY,
       files: { [HEAD]: empty },
+      commits: COMMITS_BY_BRANCH,
     })
 
     const result = await runSingleCheck('octocat/Hello-World')
@@ -150,10 +193,122 @@ describe('runSingleCheck', () => {
       repos: { [KEY]: REPO },
       activity: ACTIVITY_BY_KEY,
       files: { [HEAD]: truncated },
+      commits: COMMITS_BY_BRANCH,
     })
 
     const result = await runSingleCheck('octocat/Hello-World')
     if (!isResult(result)) throw new Error(`expected a result, got ${result.kind}`)
     expect(result.filesTruncated).toBe(true)
+  })
+
+  it('passes the branches list straight through from the Worker', async () => {
+    const repoWithBranches: RepoOk = okRepo(KEY, {
+      nameWithOwner: 'octocat/Hello-World',
+      defaultBranch: 'main',
+      headOid: HEAD,
+      createdAt: '2026-09-01T08:00:00Z',
+      pushedAt: '2026-10-01T08:00:00Z',
+      branches: { total: 3, names: ['dev', 'feature-login', 'main'] },
+    })
+    stubApi({
+      repos: { [KEY]: repoWithBranches },
+      activity: ACTIVITY_BY_KEY,
+      files: { [HEAD]: FILES_RESPONSE },
+      commits: COMMITS_BY_BRANCH,
+    })
+
+    const result = await runSingleCheck('octocat/Hello-World')
+    if (!isResult(result)) throw new Error(`expected a result, got ${result.kind}`)
+    expect(result.branches).toEqual({ total: 3, names: ['dev', 'feature-login', 'main'] })
+  })
+
+  it('returns branches as null when the Worker omits the field', async () => {
+    const { branches: _unused, ...repoWithoutBranches } = REPO
+    stubApi({
+      repos: { [KEY]: repoWithoutBranches as RepoOk },
+      activity: ACTIVITY_BY_KEY,
+      files: { [HEAD]: FILES_RESPONSE },
+      commits: COMMITS_BY_BRANCH,
+    })
+
+    const result = await runSingleCheck('octocat/Hello-World')
+    if (!isResult(result)) throw new Error(`expected a result, got ${result.kind}`)
+    expect(result.branches).toBeNull()
+  })
+
+  it('builds the contributors text from one branch of commits', async () => {
+    stubApi({
+      repos: { [KEY]: REPO },
+      activity: ACTIVITY_BY_KEY,
+      files: { [HEAD]: FILES_RESPONSE },
+      commits: { [`${KEY}@main`]: COMMITS },
+    })
+
+    const result = await runSingleCheck('octocat/Hello-World')
+    if (!isResult(result)) throw new Error(`expected a result, got ${result.kind}`)
+    expect(result.contributors).toBe('rahim 2 (67%, 1 merge); nusrat 1 (33%)')
+    expect(result.contributorsFailed).toBe(false)
+  })
+
+  it('dedupes the same commit across two branches so it is counted once', async () => {
+    const repoWithTwoBranches: RepoOk = okRepo(KEY, {
+      nameWithOwner: 'octocat/Hello-World',
+      defaultBranch: 'main',
+      headOid: HEAD,
+      createdAt: '2026-09-01T08:00:00Z',
+      pushedAt: '2026-10-01T08:00:00Z',
+      branches: { total: 2, names: ['dev', 'main'] },
+    })
+    stubApi({
+      repos: { [KEY]: repoWithTwoBranches },
+      activity: ACTIVITY_BY_KEY,
+      files: { [HEAD]: FILES_RESPONSE },
+      // Both branches have all three commits; the dedup should keep them once.
+      commits: {
+        [`${KEY}@main`]: COMMITS,
+        [`${KEY}@dev`]: COMMITS,
+      },
+    })
+
+    const result = await runSingleCheck('octocat/Hello-World')
+    if (!isResult(result)) throw new Error(`expected a result, got ${result.kind}`)
+    // Same totals as the single-branch case: 2 rahim, 1 nusrat.
+    expect(result.contributors).toBe('rahim 2 (67%, 1 merge); nusrat 1 (33%)')
+    expect(result.contributorsFailed).toBe(false)
+  })
+
+  it('flags contributorsFailed when every per-branch /commits call rejects', async () => {
+    // No commits seeded: the fake answers 404 on every /commits call.
+    stubApi({
+      repos: { [KEY]: REPO },
+      activity: ACTIVITY_BY_KEY,
+      files: { [HEAD]: FILES_RESPONSE },
+    })
+
+    const result = await runSingleCheck('octocat/Hello-World')
+    if (!isResult(result)) throw new Error(`expected a result, got ${result.kind}`)
+    expect(result.contributors).toBe('')
+    expect(result.contributorsFailed).toBe(true)
+  })
+
+  it('returns empty contributors and no failure when the repo has no head commit', async () => {
+    const emptyRepo: RepoOk = okRepo(KEY, {
+      nameWithOwner: 'octocat/Hello-World',
+      defaultBranch: 'main',
+      headOid: null,
+      isEmpty: true,
+      createdAt: '2026-09-01T08:00:00Z',
+      pushedAt: null,
+    })
+    stubApi({
+      repos: { [KEY]: emptyRepo },
+      activity: { [KEY]: [] },
+      files: {},
+    })
+
+    const result = await runSingleCheck('octocat/Hello-World')
+    if (!isResult(result)) throw new Error(`expected a result, got ${result.kind}`)
+    expect(result.contributors).toBe('')
+    expect(result.contributorsFailed).toBe(false)
   })
 })

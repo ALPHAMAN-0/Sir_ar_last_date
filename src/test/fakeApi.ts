@@ -115,8 +115,16 @@ export function stubApi(data: Partial<FakeApi> = {}) {
           events: query.get('dir') === 'asc' ? [...events].reverse() : events,
           next: null,
         }))
-      case '/api/v1/commits':
-        return answer(api.commits[repo], (commits: CommitInfo[]) => ({ commits, next: null }))
+      case '/api/v1/commits': {
+        // Per-branch answers take priority, so a fan-out across branches can
+        // return different data on each call. Fall back to the per-repo
+        // answer for callers that don't care which ref they asked for.
+        const ref = query.get('ref') ?? ''
+        return answer(
+          api.commits[`${repo}@${ref}`] ?? api.commits[repo],
+          (commits: CommitInfo[]) => ({ commits, next: null }),
+        )
+      }
       case '/api/v1/commit': {
         const sha = query.get('sha') ?? ''
         const page = query.get('page')

@@ -1,9 +1,11 @@
 // A small panel for inspecting one repo outside the sheet. The teacher pastes
 // a GitHub link, the orchestrator (`../singleCheck/run.ts`) hits the Worker
 // for the repo's facts, and the result is shown as a definition list with the
-// files changed in the head commit on the default branch.
+// files changed in the head commit on the default branch, the repo's
+// branches, and the contributors breakdown across every branch.
 
 import { useState, type FormEvent } from 'react'
+import { branchNamesText } from '../logic/branches.ts'
 import { repoUrl } from '../logic/people.ts'
 import { formatDateTime } from '../logic/time.ts'
 import { runSingleCheck } from '../singleCheck/run.ts'
@@ -23,6 +25,8 @@ const labels = {
   lastPush: 'Last push',
   firstPush: 'First push',
   defaultBranch: 'Default branch',
+  branches: 'Branches',
+  contributors: 'Contributors',
   filesChanged: 'Files changed',
 } as const
 
@@ -31,6 +35,12 @@ export function SingleCheckResultView({ result }: { result: SingleCheckResult })
   const [showAll, setShowAll] = useState(false)
   const visible = showAll ? result.files : result.files.slice(0, MAX_FILES)
   const hidden = result.files.length - visible.length
+  const branchesText = branchNamesText(result.branches, result.defaultBranch)
+  const contributorsHint = result.contributorsFailed
+    ? 'Could not be loaded'
+    : result.contributors === ''
+      ? 'No commits found'
+      : ''
 
   return (
     <dl className="single-check__grid" aria-label="Repo facts">
@@ -57,6 +67,24 @@ export function SingleCheckResultView({ result }: { result: SingleCheckResult })
 
       <dt>{labels.defaultBranch}</dt>
       <dd className="mono">{result.defaultBranch}</dd>
+
+      <dt>{labels.branches}</dt>
+      <dd>
+        {branchesText === '' ? (
+          <span className="single-check__muted">Not known.</span>
+        ) : (
+          <span className="mono">{branchesText}</span>
+        )}
+      </dd>
+
+      <dt>{labels.contributors}</dt>
+      <dd>
+        {contributorsHint !== '' ? (
+          <span className="single-check__muted">{contributorsHint}</span>
+        ) : (
+          <span className="mono">{result.contributors}</span>
+        )}
+      </dd>
 
       <dt>{labels.filesChanged}</dt>
       <dd>
@@ -131,8 +159,8 @@ export function SingleCheck() {
       <summary className="single-check__summary">Single check</summary>
       <p className="single-check__lede">
         Paste a GitHub repo link to inspect one repo on its own — name, when it was created, when it
-        was last pushed, when it was first pushed on the default branch, and which files changed in
-        the head commit.
+        was last pushed, when it was first pushed on the default branch, its branches, who
+        committed and how much across every branch, and which files changed in the head commit.
       </p>
 
       <form
