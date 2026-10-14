@@ -34,13 +34,18 @@ export type Route =
   | { kind: 'register' }
   | { kind: 'person'; rowId: string }
   | { kind: 'similarity' }
+  | { kind: 'contribution' }
 
-/** `#/p/r12` opens the person on sheet row 12. `#/s` opens the similarity tab. Anything else is the table. */
+/**
+ * `#/p/r12` opens the person on sheet row 12. `#/s` opens the similarity tab,
+ * `#/c` the contribution tab. Anything else is the table.
+ */
 export function useRoute(): Route {
   const hash = useSyncExternalStore(subscribeHash, () => window.location.hash)
   const person = /^#\/p\/(r\d+)$/.exec(hash)
   if (person) return { kind: 'person', rowId: person[1] }
   if (hash === '#/s') return { kind: 'similarity' }
+  if (hash === '#/c') return { kind: 'contribution' }
   return { kind: 'register' }
 }
 

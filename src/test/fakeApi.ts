@@ -13,7 +13,7 @@ import type {
   TreeFile,
 } from '../../shared/api.ts'
 
-export const STORAGE_KEY = 'sirar:v1'
+export const STORAGE_KEY = 'sirar:v2'
 export const FETCHED_AT = '2026-10-06T04:00:00Z'
 
 /** A made-up but valid 40-character commit id, the same for the same seed. */
@@ -157,6 +157,7 @@ export function saveSheet(rows: RowCells[], options: { deadlineInput?: string } 
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
+      kind: 'project',
       fileName: 'class-7.xlsx',
       sheetName: 'Sheet1',
       truncated: false,

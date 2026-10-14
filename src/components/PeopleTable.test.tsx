@@ -13,6 +13,7 @@ const BY_ROW: Sort = { column: 'row', descending: false }
 /** Judged rows, exactly as the register hands them to the table. The first person is on row 2. */
 function people(cells: RowCells[], repos: Record<string, RepoMeta>) {
   const sheet: Sheet = {
+    kind: 'project',
     fileName: 'class-7.xlsx',
     sheetName: 'Sheet1',
     truncated: false,

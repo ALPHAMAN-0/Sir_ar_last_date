@@ -44,6 +44,7 @@ const repo = (key: string, over: Partial<RepoOk> = {}): RepoMeta => ({
 })
 
 const sheet: Sheet = {
+  kind: 'project',
   fileName: 'class.xlsx',
   sheetName: 'Students',
   truncated: false,

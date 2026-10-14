@@ -11,6 +11,7 @@ export type Screen =
   | 'person'
   | 'timeline'
   | 'similarity'
+  | 'contribution'
   | 'error-boundary'
 
 /** What must be true before the runner can find and click this control. */

@@ -2,6 +2,7 @@
 // guessing which column is which, and turning the grid into people rows.
 // Kept separate so the page can start without downloading the Excel library.
 
+import { detectSheetKind, markColumnIndices, type SheetKind } from './kind.ts'
 import { parseRepoLink, type LinkResult } from './parseRepoLink.ts'
 
 export const MAX_ROWS = 1000
@@ -25,10 +26,13 @@ export type SheetData = {
 
 /** Which grid column holds what. `headerRow` is the grid index of the header, if there is one. */
 export type ColumnMapping = {
+  kind: SheetKind
   id: number | null
   name: number | null
   link: number | null
   headerRow: number | null
+  /** Indices of detected mark columns; empty for a project sheet. */
+  marks: number[]
 }
 
 export type SheetRow = {
@@ -139,7 +143,10 @@ export function detectMapping(grid: Cell[][]): ColumnMapping {
   } else if (name === null && spare.length > 0) {
     name = spare[0]
   }
-  return { id, name, link, headerRow }
+  const draft: ColumnMapping = { kind: 'project', id, name, link, headerRow, marks: [] }
+  const kind = detectSheetKind(grid, draft)
+  const marks = kind === 'performance' ? markColumnIndices(grid, draft) : []
+  return { kind, id, name, link, headerRow, marks }
 }
 
 /** Turns the grid into people rows, skipping the header and blank rows. */

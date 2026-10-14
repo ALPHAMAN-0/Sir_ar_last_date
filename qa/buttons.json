@@ -24,6 +24,22 @@
       "notes": "Tab that opens the similarity report at #/s."
     },
     {
+      "id": "header.tab.contribution",
+      "label": "Contribution",
+      "selector": "a.masthead__tab[href='#/c']",
+      "screen": "contribution",
+      "requires": { "hasSheet": true },
+      "notes": "Tab that opens the contribution screen at #/c."
+    },
+    {
+      "id": "contribution.back",
+      "label": "← Back to the register",
+      "selector": "a.backlink",
+      "screen": "contribution",
+      "requires": { "hasSheet": true, "route": "#/c" },
+      "notes": "Leaves the contribution screen for the register."
+    },
+    {
       "id": "upload.chooseFile",
       "label": "Choose a file",
       "selector": "button.button--primary",

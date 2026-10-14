@@ -75,6 +75,7 @@ describe('with a sheet', () => {
     expect(tabs()).not.toBeNull()
     expect(screen.getByRole('link', { name: 'Register' }).getAttribute('href')).toBe('#/')
     expect(screen.getByRole('link', { name: 'Similarity' }).getAttribute('href')).toBe('#/s')
+    expect(screen.getByRole('link', { name: 'Contribution' }).getAttribute('href')).toBe('#/c')
   })
 
   it('opens the person of sheet row 2 at #/p/r2', async () => {
@@ -92,6 +93,15 @@ describe('with a sheet', () => {
     expect(
       await screen.findByText('No two different repos in this sheet hold a file with the same content.'),
     ).toBeTruthy()
+  })
+
+  it('opens the contribution tab at #/c', async () => {
+    await openApp('#/c')
+    expect(screen.getByRole('heading', { name: 'Contribution' })).toBeTruthy()
+    // Neither repo of this sheet has a commit in its list.
+    expect(await screen.findAllByText('No commits to count.')).toHaveLength(2)
+    expect(screen.getByRole('link', { name: 'Contribution' }).className).toContain('masthead__tab--on')
+    expect(screen.getByRole('link', { name: 'Register' }).className).not.toContain('masthead__tab--on')
   })
 
   it('follows the hash as it changes', async () => {

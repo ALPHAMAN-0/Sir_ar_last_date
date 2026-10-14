@@ -1,4 +1,6 @@
+import { ContributionView } from './components/ContributionView.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
+import { PerformanceRegister } from './components/PerformanceRegister.tsx'
 import { PersonView } from './components/PersonView.tsx'
 import { Register } from './components/Register.tsx'
 import { SimilarityView } from './components/SimilarityView.tsx'
@@ -7,7 +9,9 @@ import { zoneLabel } from './logic/time.ts'
 import { useApp, useRoute } from './state/hooks.ts'
 
 export default function App() {
-  const hasSheet = useApp((state) => state.sheet !== null)
+  const sheet = useApp((state) => state.sheet)
+  const hasSheet = sheet !== null
+  const kind = sheet?.kind ?? 'project'
   const route = useRoute()
 
   return (
@@ -18,11 +22,12 @@ export default function App() {
           <span className="masthead__big">Last Date</span>
         </a>
         <p className="masthead__tag">
-          A submission register for GitHub repos.
+          {kind === 'project'
+            ? 'A submission register for GitHub repos. Who pushed in time, who did not, and what changed.'
+            : 'A performance register. Marks and grades, with auto deductions for late or changed submissions.'}
           <br />
-          Who pushed in time, who did not, and what changed.
         </p>
-        {hasSheet ? (
+        {hasSheet && kind === 'project' ? (
           <nav className="masthead__nav" aria-label="Tabs">
             <a
               className={`masthead__tab${route.kind === 'register' || route.kind === 'person' ? ' masthead__tab--on' : ''}`}
@@ -36,6 +41,12 @@ export default function App() {
             >
               Similarity
             </a>
+            <a
+              className={`masthead__tab${route.kind === 'contribution' ? ' masthead__tab--on' : ''}`}
+              href="#/c"
+            >
+              Contribution
+            </a>
           </nav>
         ) : null}
       </header>
@@ -44,10 +55,14 @@ export default function App() {
         <ErrorBoundary>
           {!hasSheet ? (
             <UploadPanel />
+          ) : kind === 'performance' ? (
+            <PerformanceRegister />
           ) : route.kind === 'person' ? (
             <PersonView rowId={route.rowId} />
           ) : route.kind === 'similarity' ? (
             <SimilarityView />
+          ) : route.kind === 'contribution' ? (
+            <ContributionView />
           ) : (
             <Register />
           )}

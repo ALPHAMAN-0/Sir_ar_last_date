@@ -501,6 +501,104 @@ select {
   font-weight: 500;
 }
 
+/* Grading controls: looks like the deadline box, but three fields wide. */
+.grading {
+  display: grid;
+  gap: 0.6rem;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--margin);
+  border-radius: var(--radius);
+  padding: 0.8rem 1rem;
+}
+.grading__field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+.grading__label {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--margin);
+  min-width: 13rem;
+}
+.grading__input {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  min-width: 0;
+  max-width: 12rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  color: var(--ink);
+}
+.grading__actions {
+  display: flex;
+  gap: 0.6rem;
+}
+.grading__state {
+  color: var(--ink-soft);
+  font-size: 0.94rem;
+}
+.grading__state strong {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 500;
+  margin-right: 0.2rem;
+}
+
+/* Kind badge: a small pill in the masthead saying which sheet type is loaded. */
+.kind-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  color: var(--ink-soft);
+}
+.kind-badge--project {
+  border-color: var(--info);
+  color: var(--info);
+}
+.kind-badge--performance {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* Performance register table. */
+.perf-table th,
+.perf-table td {
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+.perf-table__mark,
+.perf-table__total,
+.perf-table__final {
+  text-align: right;
+}
+.perf-table__final {
+  font-weight: 600;
+}
+
+/* Row tones borrowed from the project register; keeps things consistent. */
+.people__row--good { background: color-mix(in srgb, var(--good) 14%, transparent); }
+.people__row--warn { background: color-mix(in srgb, var(--warn) 18%, transparent); }
+.people__row--bad  { background: color-mix(in srgb, var(--bad)  18%, transparent); }
+.people__row--muted{ background: color-mix(in srgb, var(--muted) 14%, transparent); }
+.people__row--info { background: color-mix(in srgb, var(--info) 14%, transparent); }
+
 .picker {
   display: grid;
   gap: 0.8rem;
@@ -1739,4 +1837,86 @@ th.is-number .sort {
 }
 .single-check__muted {
   color: var(--ink-soft);
+}
+
+/* --- Contribution tab -------------------------------------------------- */
+.contribution__list {
+  display: grid;
+  gap: 0.8rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.contribution__repo {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.8rem 1rem 0.9rem;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.contribution__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.8rem;
+  overflow-wrap: anywhere;
+}
+.contribution__repo .similarity__dim {
+  margin: 0;
+}
+/* Every repo has a table of its own: fixed widths keep their columns in line down the page. */
+.contribution__repo .shares__table {
+  table-layout: fixed;
+}
+.contribution__repo .shares__table th[scope='col']:nth-child(2) {
+  width: 9.5rem;
+}
+.contribution__repo .shares__table th[scope='col']:nth-child(3) {
+  width: 11.5rem;
+}
+.contribution__repo .shares__table th[scope='col']:nth-child(4) {
+  width: 6rem;
+}
+.contribution__repo .shares__table th[scope='row'] {
+  overflow-wrap: anywhere;
+}
+.contribution__share {
+  white-space: nowrap;
+}
+.contribution__bar {
+  width: 6.5rem;
+  margin-right: 0.6rem;
+  vertical-align: middle;
+}
+.contribution__bar::-webkit-progress-value {
+  background: var(--info);
+  transition: none;
+}
+.contribution__bar::-moz-progress-bar {
+  background: var(--info);
+}
+/* On a phone the names need the room: a short bar, and narrower number columns. */
+@media (max-width: 52rem) {
+  .contribution__repo {
+    padding: 0.7rem 0.7rem 0.8rem;
+  }
+  .contribution__bar {
+    width: 2rem;
+    margin-right: 0.4rem;
+  }
+  .contribution__repo .shares__table th,
+  .contribution__repo .shares__table td {
+    padding-left: 0.3rem;
+    padding-right: 0.3rem;
+  }
+  .contribution__repo .shares__table th[scope='col']:nth-child(2) {
+    width: 6.2rem;
+  }
+  .contribution__repo .shares__table th[scope='col']:nth-child(3) {
+    width: 5.4rem;
+  }
+  .contribution__repo .shares__table th[scope='col']:nth-child(4) {
+    width: 3.8rem;
+  }
 }

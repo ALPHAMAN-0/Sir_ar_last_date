@@ -91,7 +91,7 @@ export function countCommitShares(list: CommitList, checks?: ReadonlyMap<string,
 }
 
 /** "67%", or "<1%" for a share too small to round to a whole percent. */
-function percentOf(commits: number, total: number): string {
+export function percentOf(commits: number, total: number): string {
   const pct = Math.round((commits / total) * 100)
   return pct === 0 ? '<1%' : `${pct}%`
 }

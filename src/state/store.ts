@@ -14,6 +14,7 @@ import {
   type StatusResponse,
 } from '../../shared/api.ts'
 import { ApiError, createClient, type Pause } from '../api/client.ts'
+import { defaultGrading, type Grading } from '../logic/grading.ts'
 import { apiRepoName } from '../logic/repoName.ts'
 import { parseDeadlineInput } from '../logic/time.ts'
 import { judge, type ActivityData, type Status, type Verdict } from '../logic/verdict.ts'
@@ -28,6 +29,7 @@ import {
   type SheetData,
   type SheetRow,
 } from '../sheet/columns.ts'
+import type { SheetKind } from '../sheet/kind.ts'
 
 export type SortColumn =
   | 'row'
@@ -45,6 +47,7 @@ export type Sort = { column: SortColumn; descending: boolean }
 export type Sheet = {
   fileName: string
   sheetName: string
+  kind: SheetKind
   rows: SheetRow[]
   truncated: boolean
 }
@@ -58,6 +61,10 @@ export type AppState = {
   /** The deadline in force: last millisecond that counts as on time. */
   deadline: number | null
   deadlineShifted: boolean
+  /** What is typed in the grading box. */
+  gradingInput: { total: string; offLate: string; offChanged: string }
+  /** The grading rules in force. */
+  grading: Grading
   repos: ReadonlyMap<string, RepoMeta>
   activity: ReadonlyMap<string, ActivityData>
   /** Oldest fetch time among the repo facts currently shown. */
@@ -71,7 +78,7 @@ export type AppState = {
   uploadError: string | null
 }
 
-const STORAGE_KEY = 'sirar:v1'
+const STORAGE_KEY = 'sirar:v2'
 const DEFAULT_SORT: Sort = { column: 'pushedAt', descending: true }
 const SORT_COLUMNS: readonly SortColumn[] = [
   'row', 'id', 'name', 'repo', 'status', 'lateBy', 'createdAt', 'pushedAt', 'committedAt', 'commits',
@@ -82,11 +89,13 @@ const MAX_ACTIVITY_PAGES = 5
 export const HISTORY_PAGES = 3
 
 type Saved = {
+  kind: SheetKind
   fileName: string
   sheetName: string
   truncated: boolean
   rows: Array<[rowNumber: number, id: string, name: string, rawLink: string]>
   deadlineInput: string
+  grading: Grading
   sort: Sort
 }
 
@@ -111,7 +120,10 @@ function restore(): Partial<AppState> {
           link: parseRepoLink(String(rawLink ?? '')),
         })
       }
+      // Old saves (v1) had no field; everything before this feature was a project sheet.
+      const kind: SheetKind = saved.kind === 'performance' ? 'performance' : 'project'
       patch.sheet = {
+        kind,
         fileName: saved.fileName,
         sheetName: String(saved.sheetName ?? ''),
         rows,
@@ -124,6 +136,19 @@ function restore(): Partial<AppState> {
         patch.deadlineInput = saved.deadlineInput
         patch.deadline = parsed.ms
         patch.deadlineShifted = parsed.shifted
+      }
+    }
+    if (saved.grading && typeof saved.grading === 'object') {
+      const { totalMark, offForLate, offForChanged } = saved.grading
+      patch.grading = {
+        totalMark: typeof totalMark === 'number' ? totalMark : null,
+        offForLate: typeof offForLate === 'number' ? offForLate : 0,
+        offForChanged: typeof offForChanged === 'number' ? offForChanged : 0,
+      }
+      patch.gradingInput = {
+        total: patch.grading.totalMark === null ? '' : String(patch.grading.totalMark),
+        offLate: String(patch.grading.offForLate),
+        offChanged: String(patch.grading.offForChanged),
       }
     }
     if (saved.sort && SORT_COLUMNS.includes(saved.sort.column)) {
@@ -144,11 +169,13 @@ function save(): void {
       return
     }
     const saved: Saved = {
+      kind: state.sheet.kind,
       fileName: state.sheet.fileName,
       sheetName: state.sheet.sheetName,
       truncated: state.sheet.truncated,
       rows: state.sheet.rows.map((row) => [row.rowNumber, row.id, row.name, row.rawLink]),
       deadlineInput: appliedDeadlineInput,
+      grading: state.grading,
       sort: state.sort,
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(saved))
@@ -163,6 +190,8 @@ let state: AppState = {
   deadlineInput: '',
   deadline: null,
   deadlineShifted: false,
+  gradingInput: { total: '', offLate: '', offChanged: '' },
+  grading: defaultGrading(),
   repos: new Map(),
   activity: new Map(),
   checkedAt: null,
@@ -421,7 +450,7 @@ function adoptSheet(fileName: string, data: SheetData, mapping: ColumnMapping): 
   const rows = buildRows(data, mapping)
   resetData()
   set({
-    sheet: { fileName, sheetName: data.sheetName, rows, truncated: data.truncated },
+    sheet: { kind: mapping.kind, fileName, sheetName: data.sheetName, rows, truncated: data.truncated },
     columns: { data, mapping },
     repos: new Map(),
     activity: new Map(),
@@ -475,6 +504,8 @@ export function clearSheet(): void {
     deadlineInput: '',
     deadline: null,
     deadlineShifted: false,
+    gradingInput: { total: '', offLate: '', offChanged: '' },
+    grading: defaultGrading(),
     statusFilter: 'all',
     search: '',
     uploadError: null,
@@ -523,6 +554,33 @@ export function applyDeadline(): boolean {
   set({ deadline: parsed.ms, deadlineShifted: parsed.shifted })
   save()
   ensure()
+  return true
+}
+
+export function setGradingInput(field: 'total' | 'offLate' | 'offChanged', value: string): void {
+  set({ gradingInput: { ...state.gradingInput, [field]: value } })
+}
+
+/**
+ * Puts the typed grading values into force. Done on a button, like the deadline.
+ * Empty total means no upper bound; non-numeric values are rejected (the box says so).
+ * Negative deductions are kept as 0 — you cannot add marks for being late.
+ */
+export function applyGrading(): boolean {
+  const { total, offLate, offChanged } = state.gradingInput
+  const totalValue = total.trim() === '' ? null : Number(total)
+  const lateValue = Number(offLate)
+  const changedValue = Number(offChanged)
+  if (totalValue !== null && (!Number.isFinite(totalValue) || totalValue < 0)) return false
+  if (!Number.isFinite(lateValue) || lateValue < 0) return false
+  if (!Number.isFinite(changedValue) || changedValue < 0) return false
+  const grading: Grading = {
+    totalMark: totalValue,
+    offForLate: lateValue,
+    offForChanged: changedValue,
+  }
+  set({ grading })
+  save()
   return true
 }
 
