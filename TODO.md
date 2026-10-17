@@ -74,6 +74,14 @@ rewrite (deployed 2026-10-06, version 4f73fa07).
       and named nobody else. The statuses for a deadline in the middle of that class
       were right by the push log, except for the fork case listed below.
 
+- [x] Shared code (2026-10-17, in the working tree, not committed): a second part of
+      the Similarity tab that finds code two repos share even where a copy was edited
+      (spaces, line endings, case, comments or some lines changed), counted in lines,
+      with links to the shared lines on GitHub, and an eighth report sheet. New Worker
+      route `/api/v1/blobs` with its own limit `RL_BLOB` (in `wrangler.jsonc`; nothing
+      to create at Cloudflare). Checked on 22 real repos through the local Worker; the
+      evidence is in `.claude/tdd/shared-code.tdd.md` and SIMILARITY.md, iteration 10.
+
 ## Not done
 - [ ] Go online from GitHub Actions only when the tests pass (2026-10-07). The
       `deploy` job works: both secrets are on GitHub since 2026-10-08, and the push of

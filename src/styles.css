@@ -1788,6 +1788,20 @@ th.is-number .sort {
   font-size: 0.86em;
 }
 
+/* Shared code: a part of its own below the identical files, with its own heading. */
+.similarity__section {
+  display: grid;
+  gap: 1.1rem;
+  margin-top: 1.4rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--border);
+}
+.similarity__section-title {
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
 /* Repos handed in by more than one person: the plainest finding, so it comes first. */
 .similarity__same ul {
   margin: 0.35rem 0 0;

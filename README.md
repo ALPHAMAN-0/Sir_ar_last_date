@@ -2,7 +2,7 @@
 
 A submission register and gradebook that runs in your browser. Upload an Excel
 sheet, set a deadline, and the page tells you who pushed in time, who did not,
-which files changed, and which repos hold identical files. It marks the class
+which files changed, and which repos hold identical files or share code. It marks the class
 too: one rules table for everyone, and a bonus box per student for the marks
 you give while asking questions.
 
@@ -23,6 +23,11 @@ you give while asking questions.
   check never costs marks.
 - **Deadline in one place.** Type it once; the register sorts, the person
   page draws it across the timeline, and the file's Info sheet records it.
+- **Similarity tab.** Repos that hold identical files, and who had them on
+  GitHub first. Below that, **shared code**: repos that share code even
+  where a copy was edited (spaces, line endings, case, comments or some
+  lines changed), with links to the shared lines on both sides. Places to
+  look, not a verdict.
 - **Contribution tab.** Who committed to each repo and
   how large each person's share of the commits is, counted the same way as
   the report's "Commits by person" column. A repo handed in by several people

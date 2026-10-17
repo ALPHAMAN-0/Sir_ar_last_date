@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MAX_BLOBS_PER_CALL,
   activityUrl,
+  blobsUrl,
   commitsUrl,
   commitUrl,
   parseActivityQuery,
+  parseBlobsQuery,
   parseCommitQuery,
   parseCommitsQuery,
   parseReposQuery,
@@ -176,6 +179,39 @@ describe('tree query', () => {
       `?repo=a%2Fx&sha=${SHA}&depth=2`,
     ]) {
       expect(parseTreeQuery(bad), bad).toBeNull()
+    }
+  })
+})
+
+describe('blobs query', () => {
+  const ONE = '1'.repeat(40)
+  const TWO = '2'.repeat(40)
+
+  it('round-trips, with the contents in one order only', () => {
+    expect(blobsUrl({ repo: 'a/x', shas: [TWO, ONE, TWO] })).toBe(`/api/v1/blobs?repo=a%2Fx&b=${ONE}&b=${TWO}`)
+    expect(parseBlobsQuery(search(blobsUrl({ repo: 'a/x', shas: [TWO, ONE] })))).toEqual({ repo: 'a/x', shas: [ONE, TWO] })
+  })
+
+  it('takes up to MAX_BLOBS_PER_CALL contents', () => {
+    const shas = Array.from({ length: MAX_BLOBS_PER_CALL + 1 }, (_, i) => i.toString(16).padStart(40, '0'))
+    expect(parseBlobsQuery(search(blobsUrl({ repo: 'a/x', shas: shas.slice(0, MAX_BLOBS_PER_CALL) })))).not.toBeNull()
+    expect(parseBlobsQuery(search(blobsUrl({ repo: 'a/x', shas })))).toBeNull()
+  })
+
+  it('refuses every other spelling, so the edge cache has one key per list', () => {
+    for (const bad of [
+      '?repo=a%2Fx',
+      `?b=${ONE}&repo=a%2Fx`,
+      `?repo=a%2Fx&b=${TWO}&b=${ONE}`,
+      `?repo=a%2Fx&b=${ONE}&b=${ONE}`,
+      `?repo=a%2Fx&b=${'ab'.repeat(20).toUpperCase()}`,
+      `?repo=a%2Fx&b=main`,
+      `?repo=A%2Fx&b=${ONE}`,
+      `?repo=a%2Fx&repo=a%2Fy&b=${ONE}`,
+      `?repo=a%2Fx&b=${ONE}&raw=1`,
+      `?repo=a/x&b=${ONE}`,
+    ]) {
+      expect(parseBlobsQuery(bad), bad).toBeNull()
     }
   })
 })

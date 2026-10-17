@@ -2,8 +2,10 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TreeFile } from '../../shared/api.ts'
+import type { CodeRequest } from '../similarity/code.worker.ts'
 import { analyse } from '../similarity/compare.ts'
 import type { CompareRequest } from '../similarity/compare.worker.ts'
+import { analyseCode } from '../similarity/sharedCode.ts'
 import { formatDateTimeShort } from '../logic/time.ts'
 import { FIRST_NOTE } from '../similarity/firstText.ts'
 import { failure, okRepo, oid, saveSheet, stubApi, type FakeApi, type RowCells } from '../test/fakeApi.ts'
@@ -43,9 +45,11 @@ const SHEET: RowCells[] = [
 
 /** What the page asked the comparison worker, in order. */
 let asked: Array<{ url: string; options: unknown; request: CompareRequest }>
+/** What the page asked the shared-code worker, in order. */
+let askedCode: Array<{ url: string; request: CodeRequest }>
 let fake: ReturnType<typeof stubApi>
 
-/** Stands in for compare.worker.ts: the same comparison, answered a moment later. */
+/** Stands in for compare.worker.ts and code.worker.ts: the same comparison, answered a moment later. */
 class FakeWorker extends EventTarget {
   url: string
   options: unknown
@@ -54,9 +58,17 @@ class FakeWorker extends EventTarget {
     this.url = String(url)
     this.options = options
   }
-  postMessage(request: CompareRequest) {
-    asked.push({ url: this.url, options: this.options, request })
-    const analysis = analyse(request.repos, { commonLimit: request.commonLimit })
+  postMessage(request: CompareRequest | CodeRequest) {
+    if (this.url.includes('code.worker')) {
+      const code = request as CodeRequest
+      askedCode.push({ url: this.url, request: code })
+      const analysis = analyseCode(code.repos, { commonLimit: code.commonLimit })
+      setTimeout(() => this.dispatchEvent(new MessageEvent('message', { data: analysis })))
+      return
+    }
+    const files = request as CompareRequest
+    asked.push({ url: this.url, options: this.options, request: files })
+    const analysis = analyse(files.repos, { commonLimit: files.commonLimit })
     setTimeout(() => this.dispatchEvent(new MessageEvent('message', { data: analysis })))
   }
   terminate() {}
@@ -64,6 +76,7 @@ class FakeWorker extends EventTarget {
 
 beforeEach(() => {
   asked = []
+  askedCode = []
   saveSheet(SHEET)
   fake = stubApi({
     repos: { 'a/x': okRepo('a/x'), 'b/y': okRepo('b/y'), 'c/z': okRepo('c/z') },

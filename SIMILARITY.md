@@ -5,9 +5,9 @@
 > through the Worker's `/api/v1/tree`. The sections from "Context" to "Phases"
 > are kept as the record of iterations 0 to 7; where they say "file-name
 > overlap", "Jaccard", "no token" or "the Worker is unchanged", they describe
-> the old design. The current behaviour is documented in
-> [README.md](README.md#the-similarity-check) and in the log entry for
-> iteration 8 at the end of this file.
+> the old design. The current behaviour is documented in the log entries for
+> iteration 8 (identical files) and later at the end of this file. Iteration 10
+> added a second check, **shared code**, for copies that were edited.
 
 This is an **iteration plan**, not a one-shot spec. Each section has a
 "Status" line you'll update as the design and code evolve. The plan is
@@ -75,9 +75,9 @@ changing the plan.
 
 | Field | Value |
 | --- | --- |
-| Iteration | 8 (content comparison; tests 233/233, lint clean, build clean) |
-| Last update | 2026-10-06 |
-| Decisions locked | compare=identical content (git blob hash), file lists=through the Worker, pairs=only repos that share a content, report=browser+xlsx |
+| Iteration | 10 (shared code; tests 849/849, lint clean, build clean) |
+| Last update | 2026-10-17 |
+| Decisions locked | compare=identical content (git blob hash), file lists=through the Worker, pairs=only repos that share a content, report=browser+xlsx; shared code=winnowed fingerprints of the code text (through `/api/v1/blobs`), counted in lines, same starter limit, a pointer only: it never names a copier |
 | Open questions | see **Open questions** at the bottom |
 
 Update this table whenever a section changes.
@@ -401,10 +401,10 @@ questions** section at the bottom.
 1. ~~**Content-level matching?**~~ Answered in iteration 8: yes, and it
    replaced path matching. Hashes are compared across all paths, so a
    renamed copy is found too.
-2. **Edited copies.** A file changed by one character has another hash.
-   Catching that needs the file contents and a token-level comparison
-   (winnowing, as MOSS does). The contents would have to come through a
-   new, size-capped Worker route.
+2. ~~**Edited copies.**~~ Answered in iteration 10: a second check,
+   "Shared code", reads the code text through a new, size-capped Worker
+   route (`/api/v1/blobs`) and compares winnowed fingerprints, as MOSS
+   does. Renamed names and reordered code are still not caught.
 3. **Starter code named by the teacher.** The starter-file limit is a
    guess from counts. A "starter repo" field would let the teacher name
    the handed-out code exactly; every content in that repo would then be
@@ -601,3 +601,52 @@ Update this on every change to the plan.
     reading four file lists. The workbook opens in LibreOffice.
   - Not yet done: a run on the local Worker with a real token, which is
     the only check of the new `parent` field against GitHub itself.
+- **2026-10-17, iteration 10**: shared code. The teacher asked whether the
+  check could catch copies that were edited (the exact check misses a file
+  that differs by one character, or only by its line endings) and chose
+  "shared-code %" over "ignore spaces only" and over a full structural
+  comparison (JPlag). Decisions:
+  - Exact copies stay the proof. Shared code is a second list, "places to
+    look": it is never painted red and never names a copier, because two
+    students who took code from the same class example share it too.
+  - Ignored: spaces, line endings, letter case and comments. Not ignored:
+    names, so two pages built alike but with other words do not match.
+  - Counted in lines of code, so a teacher can open both files at the
+    lines shown. A fingerprint held by more repos than the starter limit is
+    left out of both sides, like a starter file.
+
+  What changed:
+  - New Worker route `/api/v1/blobs?repo=&b=&b=`: up to 40 file texts of one
+    repo by content hash in one GraphQL call (one quota point), its own
+    per-visitor limit `RL_BLOB` (120 a minute), the answer capped at 1 MB
+    and cached for a week (a content hash never points at other text).
+    `graphql()` takes an optional `maxBytes`. GitHub escapes `<` and `>` as
+    six characters and cuts a text at about 512 KB (`isTruncated`); both
+    were seen on real data.
+  - New `codeText.ts` (pure): which files are read (code and markup by
+    extension, at most 150 KB, notebooks 500 KB with only their cell
+    sources), comments removed per language with line numbers kept, tokens
+    (Bangla vowel signs stay inside words), runs of K = 12 tokens hashed to
+    53 bits, winnowing with W = 8, each fingerprint with its first and last
+    line.
+  - New `sharedCode.ts` (pure): per pair, A's own lines that are also in B
+    and the other way round, each content once per repo; labels from
+    "Almost all code shared" to "Only a few lines shared" (under 20 lines);
+    pairs under 5 shared lines are not listed. `codePairDetail` gives, per
+    file, the file on the other side and the line ranges on both.
+  - New `codeLoader.ts`, `code.worker.ts` and `components/SharedCode.tsx`:
+    the texts are read 40 files and about 150 KB a call (the same files
+    always give the same calls, so cached answers are found again), turned
+    into fingerprints at once and dropped; the comparison runs in a Web
+    Worker; the section lists the pairs and, opened, the files with links to
+    the shared lines on GitHub at the compared commit.
+  - `report.ts` writes an eighth sheet, "Shared code", and five Info lines.
+  - Verified: 80 new tests (849 in all). On 22 real WebTech repos of
+    another class, read through the local Worker with a real token: 26
+    calls, 4.5 s, and the same 173 pairs, to the line, as a count from
+    `git clone`d copies. Top finds: a lab where one copy differs only in
+    the spaces on blank lines and two lines (98% of `form.js`), and another
+    at 94-100% per file. It also showed the known weak spot: students who
+    copied the teacher's class examples match each other unless more of
+    them than the limit did. The page was checked in headless Chrome at
+    1280 px and phone width, with no console error from the new code.

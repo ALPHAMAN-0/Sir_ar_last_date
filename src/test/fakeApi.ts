@@ -71,6 +71,10 @@ export type FakeApi = {
   listings: Record<string, Pick<TreeResponse, 'dirs' | 'files'> | Failure>
   /** The quota answer. Null answers 404, which the page quietly ignores. */
   status: StatusResponse | null
+  /** File texts by content hash, for `/blobs`. A hash that is missing answers "missing". */
+  texts: Record<string, string>
+  /** A failing `/blobs` by repo. */
+  blobFailures: Record<string, Failure>
 }
 
 const json = (status: number, body: unknown) =>
@@ -94,6 +98,8 @@ export function stubApi(data: Partial<FakeApi> = {}) {
     trees: {},
     listings: {},
     status: null,
+    texts: {},
+    blobFailures: {},
     ...data,
   }
   const fetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -146,6 +152,12 @@ export function stubApi(data: Partial<FakeApi> = {}) {
           dirs: [],
           tooLarge: false,
         }))
+      case '/api/v1/blobs': {
+        const failing = api.blobFailures[repo]
+        if (failing) return answer(failing, () => null)
+        const blobs = query.getAll('b').map((sha) => (sha in api.texts ? { sha, text: api.texts[sha] } : { sha, skipped: 'missing' }))
+        return json(200, { blobs, tooLarge: false })
+      }
       default:
         return json(404, { error: { code: 'not_found', message: 'No such route.' } })
     }
