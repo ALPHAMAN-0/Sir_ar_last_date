@@ -2,8 +2,10 @@
 
 A submission register and gradebook that runs in your browser. Upload an Excel
 sheet, set a deadline, and the page tells you who pushed in time, who did not,
-which files changed, and which repos hold identical files. It can also mark
-grades for you, with auto deductions for late or changed-after-deadline work.
+which files changed, and which repos hold identical files or share code. It can
+also mark grades for you, with auto deductions for late or changed-after-
+deadline work and a bonus box per student for marks given while asking
+questions.
 
 ## Architecture / How it Works
 
@@ -33,6 +35,11 @@ flowchart LR
 - **Deadline in one place.** Type it once; the register sorts, the person
   page draws it across the timeline, and the file's Info sheet records it.
 - **Contribution tab.** For a project sheet: who committed to each repo and
+- **Similarity tab.** Repos that hold identical files, and who had them on
+  GitHub first. Below that, **shared code**: repos that share code even
+  where a copy was edited (spaces, line endings, case, comments or some
+  lines changed), with links to the shared lines on both sides. Places to
+  look, not a verdict.
   how large each person's share of the commits is, counted the same way as
   the report's "Commits by person" column. A repo handed in by several people
   is shown once, with all of them.
