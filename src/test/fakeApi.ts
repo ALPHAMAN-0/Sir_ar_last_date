@@ -11,6 +11,7 @@ import type {
   RepoOk,
   StatusResponse,
   TreeFile,
+  TreeResponse,
 } from '../../shared/api.ts'
 
 export const STORAGE_KEY = 'sirar:v2'
@@ -66,6 +67,8 @@ export type FakeApi = {
   branches: Record<string, ActivityEvent[]>
   /** File lists by repo, or by `${repo}@${commit}` for the files at an older commit. */
   trees: Record<string, TreeFile[] | Failure>
+  /** One folder level (a `flat` tree request) by `${repo}@${commit or folder hash}`. */
+  listings: Record<string, Pick<TreeResponse, 'dirs' | 'files'> | Failure>
   /** The quota answer. Null answers 404, which the page quietly ignores. */
   status: StatusResponse | null
 }
@@ -89,6 +92,7 @@ export function stubApi(data: Partial<FakeApi> = {}) {
     commits: {},
     files: {},
     trees: {},
+    listings: {},
     status: null,
     ...data,
   }
@@ -131,6 +135,12 @@ export function stubApi(data: Partial<FakeApi> = {}) {
         return answer(api.files[page ? `${sha}#${page}` : sha], (files: CommitFilesResponse) => files)
       }
       case '/api/v1/tree':
+        if (query.get('flat') === '1') {
+          return answer(api.listings[`${repo}@${query.get('sha')}`], (level: Pick<TreeResponse, 'dirs' | 'files'>) => ({
+            ...level,
+            tooLarge: false,
+          }))
+        }
         return answer(api.trees[`${repo}@${query.get('sha')}`] ?? api.trees[repo], (files: TreeFile[]) => ({
           files,
           dirs: [],
@@ -153,11 +163,14 @@ export type RowCells = [id: string, name: string, link: string]
  * Saves a sheet the way the store does, so `start()` restores it. The first
  * person is on sheet row 2, below the header, so their route is `#/p/r2`.
  */
-export function saveSheet(rows: RowCells[], options: { deadlineInput?: string } = {}): void {
+export function saveSheet(
+  rows: RowCells[],
+  options: { deadlineInput?: string; kind?: 'project' | 'lab' } = {},
+): void {
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
-      kind: 'project',
+      kind: options.kind ?? 'project',
       fileName: 'class-7.xlsx',
       sheetName: 'Sheet1',
       truncated: false,

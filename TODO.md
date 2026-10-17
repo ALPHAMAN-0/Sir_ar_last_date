@@ -1,6 +1,6 @@
 # Sir_ar_last_date — work status
 
-Updated 2026-10-14. The app is built and online at
+Updated 2026-10-17. The app is built and online at
 https://sir-ar-last-date.sir-last-date.workers.dev, including the similarity
 rewrite (deployed 2026-10-06, version 4f73fa07).
 
@@ -57,6 +57,13 @@ rewrite (deployed 2026-10-06, version 4f73fa07).
       `#/c`, with every repo of a project sheet once, who committed to it, their commits
       and their share, counted as the report's "Commits by person" column counts them.
       24 new tests; the evidence is in `.claude/tdd/contribution-tab.tdd.md`.
+- [x] Marking and two uploads (2026-10-17, in the working tree, not committed): an
+      always-light warm paper + sage look; the home page's two uploads (Project base,
+      Lab / Performance base); a rules table per project and per term (total, late,
+      changed after, no submission) in force as typed; a Bonus box per student with
+      Enter to the next; Mid / Final judged by their own folders; marks at the end of
+      the Results sheet and "Late by" spelled out. Evidence in
+      `.claude/tdd/marking.tdd.md`; see docs/GRADING.md.
 - [x] Checked against real GitHub on the local Worker with a real token (2026-10-14),
       on 4 well-known repos and 14 public forks of one starter repo: the repo facts
       (name, main branch, head commit, created, last push, fork, parent) equal
@@ -179,20 +186,23 @@ cell) the sheet group does not show: that is the case checked against real GitHu
 - One person under two identities (a linked e-mail and an unlinked one) is two lines.
 - In a fork the parent's authors are in the list. The tab says so; it does not subtract.
 
-### Performance base (the uncommitted work of 2026-10-13)
-- The header row of a marks sheet is read as a student and the mark columns are called
-  "Column C", "Column D". A sheet with marks and repo links opens as a project sheet, so
-  the late and changed-after deductions can never apply, and the screen has no deadline
-  box. After a reload the table is empty. In the file the marks are text.
-- `grading.ts` gives 0 to a row whose check failed, which blames a student for a failure
-  of the check. `PerformanceRegister.tsx` has no test at all (0 % covered).
-- `docs/SHEETS.md` and `.puku-cli/tdd/dual-sheet-kind.tdd.md` describe a "Switch sheet
-  type" button, API routes and tests that do not exist. The README it replaced matched the
-  code and is still in git (`git show HEAD:README.md`).
-- Four leftover scripts (`qa/check-*.ts`) broke `npm run build`. They were moved to
-  `.puku-cli/scratch/`, unchanged; they can be deleted.
-- The storage key went from `sirar:v1` to `sirar:v2` without clearing the old one, so a
-  sheet saved by the version online stays in the browser, out of reach of Clear.
+### Performance base (the work of 2026-10-13), replaced 2026-10-17
+The auto-detected performance screen is gone: the home page now has two uploads
+(Project base, Lab / Performance base) and the teacher chooses. Its edge cases above
+no longer apply: a lab sheet is read with its repo links and keeps its other columns
+(saved, so they survive a reload); a failed check gives no mark instead of 0; the
+"Switch sheet type" text in `docs/SHEETS.md` was rewritten. The `sirar:v1` key is
+still not cleared.
+
+### Marking and lab sheets (2026-10-17), known limits
+- A term folder must be at the top of the repo; `CSE101/Mid` is not found.
+- The push that changed a term folder is found by halving, which assumes a folder
+  that arrived stays and one that reached its final state stays in it. A folder
+  changed and changed back is dated by its last arrival in that state.
+- "Late by" on a lab row counts to the push that brought or last changed the folder;
+  the Person page's timeline still shows every push to the repo.
+- A bonus follows the student ID; two rows with one ID share a bonus.
+- No sorting by final mark yet.
 
 ### Later, by choice
 - Similarity: a "starter repo" field, comparing the commit at the deadline, a

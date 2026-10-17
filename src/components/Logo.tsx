@@ -10,8 +10,8 @@ export function Logo({ className }: Props) {
     <svg className={className} viewBox="0 0 64 64" aria-hidden="true" focusable="false">
       <defs>
         <linearGradient id="fd-logo-tile" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#6f5cff" />
-          <stop offset="1" stopColor="#3b2bd4" />
+          <stop offset="0" stopColor="#6e9b80" />
+          <stop offset="1" stopColor="#4f7a63" />
         </linearGradient>
       </defs>
       <rect width="64" height="64" rx="16" fill="url(#fd-logo-tile)" />
@@ -28,7 +28,7 @@ export function Logo({ className }: Props) {
       <path
         d="M33.2 28.2l4.1 4.1 7.6-8.2"
         fill="none"
-        stroke="#4a37e6"
+        stroke="#3f6a53"
         strokeWidth="4"
         strokeLinecap="round"
         strokeLinejoin="round"

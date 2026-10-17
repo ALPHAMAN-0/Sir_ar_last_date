@@ -56,6 +56,7 @@ const sheet: Sheet = {
     row(6, '12', 'Tania', 'not a link at all'),
     row(7, '13', 'Zahid', 'https://github.com/rahim/task'),
   ],
+  extraHeaders: [],
 }
 
 const repos = new Map<string, RepoMeta>([
@@ -222,6 +223,51 @@ describe('labels and links', () => {
     expect(rows[1].branches).toBeNull()
     // No work, no repo, no link: no branches worth reporting.
     expect(rows.slice(2, 5).map((item) => item.branches)).toEqual([null, null, null])
+  })
+
+  it('spells out how late a row was, for the downloaded file', () => {
+    // Karim first pushed three hours after the deadline.
+    const log = {
+      events: [{ ts: '2026-10-05T21:00:00Z', type: 'branch_creation', ref: 'refs/heads/main', before: ZERO_OID, after: 'a'.repeat(40), actor: 'karim' }],
+      exhausted: true,
+      capped: false,
+      settled: true,
+      probe: null,
+      failed: false,
+    }
+    const judged = judgeRows(sheet, repos, new Map([['karim/task', log]]), DEADLINE)
+    expect(toExportRows(judged, true)[1]).toMatchObject({ status: 'Late', lateBy: '3 hours', lateMinutes: 180 })
+  })
+
+  it('marks every row by the rules table and the bonus', () => {
+    const rules = { total: 10, late: 2, changed: 1, noSubmission: 0 }
+    const bonus = new Map([['Rahim', 3], ['karim', 1]])
+    const rows = toExportRows(people, true, new Map(), new Map(), {
+      rules,
+      bonusOf: (sheetRow) => bonus.get(sheetRow.name) ?? null,
+    })
+    expect(rows.map((item) => [item.name, item.markRule, item.bonus, item.finalMark])).toEqual([
+      ['Rahim', '', 3, 10],
+      ['karim', 'Late −2', 1, 9],
+      ['Salma', 'No submission: 0', null, 0],
+      ['Nadia', 'No submission: 0', null, 0],
+      ['Tania', 'No submission: 0', null, 0],
+      ['Zahid', '', null, 10],
+    ])
+  })
+
+  it('gives no marks until the rules say what the total is', () => {
+    expect(toExportRows(people, true).map((item) => item.finalMark)).toEqual([null, null, null, null, null, null])
+  })
+
+  it("carries a lab sheet's term folder, lab tasks and other columns", () => {
+    const person: PersonRow = {
+      ...people[0],
+      row: { ...people[0].row, extra: ['8', 'A'] },
+      lab: { folder: 'Mid', tasks: ['Lab 1'] },
+    }
+    expect(toExportRows([person], true)[0]).toMatchObject({ labFolder: 'Mid', labTasks: ['Lab 1'], extra: ['8', 'A'] })
+    expect(toExportRows([people[0]], true)[0].labFolder).toBeUndefined()
   })
 
   it('falls back on what the register knows: a late row names its own first push', () => {

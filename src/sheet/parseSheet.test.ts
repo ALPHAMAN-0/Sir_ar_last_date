@@ -31,7 +31,7 @@ describe('the expected sheet: id, name, repolink', () => {
       ['20-41235-1', 'Karim Hasan', 'github.com/karim/Task-1.git'],
     ])
     expect(data.sheetName).toBe('Students')
-    expect(mapping).toEqual({ kind: 'project', id: 0, name: 1, link: 2, headerRow: 0, marks: [] })
+    expect(mapping).toEqual({ kind: 'project', id: 0, name: 1, link: 2, headerRow: 0, extra: [] })
     expect(summary(rows)).toEqual([
       [2, '20-41234-1', 'Rahim Uddin', 'rahim/task-1'],
       [3, '20-41235-1', 'Karim Hasan', 'karim/task-1'],
@@ -44,7 +44,7 @@ describe('the expected sheet: id, name, repolink', () => {
       ['GitHub Repo Link', 'Student Name', 'Student ID'],
       ['https://github.com/a/b', 'Salma', 7],
     ])
-    expect(mapping).toEqual({ kind: 'project', id: 2, name: 1, link: 0, headerRow: 0, marks: [] })
+    expect(mapping).toEqual({ kind: 'project', id: 2, name: 1, link: 0, headerRow: 0, extra: [] })
     expect(summary(rows)).toEqual([[2, '7', 'Salma', 'a/b']])
   })
 
@@ -79,7 +79,7 @@ describe('sheets without a usable header', () => {
       ['1', 'Rahim', 'https://github.com/rahim/x'],
       ['2', 'Karim', 'https://github.com/karim/x'],
     ])
-    expect(mapping).toEqual({ kind: 'project', id: 0, name: 1, link: 2, headerRow: null, marks: [] })
+    expect(mapping).toEqual({ kind: 'project', id: 0, name: 1, link: 2, headerRow: null, extra: [] })
     expect(rows).toHaveLength(2)
   })
 
@@ -88,7 +88,7 @@ describe('sheets without a usable header', () => {
       ['Roll', 'Naam', 'Kaj'],
       ['1', 'Rahim', 'https://github.com/rahim/x'],
     ])
-    expect(mapping).toEqual({ kind: 'project', id: 0, name: 1, link: 2, headerRow: 0, marks: [] })
+    expect(mapping).toEqual({ kind: 'project', id: 0, name: 1, link: 2, headerRow: 0, extra: [] })
     expect(rows).toHaveLength(1)
   })
 

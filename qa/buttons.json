@@ -12,7 +12,9 @@
       "label": "Register",
       "selector": "a.masthead__tab[href='#/']",
       "screen": "register",
-      "requires": { "hasSheet": true },
+      "requires": {
+        "hasSheet": true
+      },
       "notes": "Tab that opens the register at #/."
     },
     {
@@ -20,7 +22,9 @@
       "label": "Similarity",
       "selector": "a.masthead__tab[href='#/s']",
       "screen": "similarity",
-      "requires": { "hasSheet": true },
+      "requires": {
+        "hasSheet": true
+      },
       "notes": "Tab that opens the similarity report at #/s."
     },
     {
@@ -28,7 +32,9 @@
       "label": "Contribution",
       "selector": "a.masthead__tab[href='#/c']",
       "screen": "contribution",
-      "requires": { "hasSheet": true },
+      "requires": {
+        "hasSheet": true
+      },
       "notes": "Tab that opens the contribution screen at #/c."
     },
     {
@@ -36,22 +42,39 @@
       "label": "← Back to the register",
       "selector": "a.backlink",
       "screen": "contribution",
-      "requires": { "hasSheet": true, "route": "#/c" },
+      "requires": {
+        "hasSheet": true,
+        "route": "#/c"
+      },
       "notes": "Leaves the contribution screen for the register."
     },
     {
       "id": "upload.chooseFile",
-      "label": "Choose a file",
-      "selector": "button.button--primary",
+      "label": "Choose a file (Project base)",
+      "selector": "section.upload-card--project button.button--primary",
       "screen": "upload",
-      "notes": "Opens the hidden file input. We click the button itself; the input is a side effect."
+      "notes": "Opens the hidden file input of the project card. We click the button itself; the input is a side effect."
     },
     {
       "id": "upload.downloadSample",
-      "label": "Download a sample sheet",
-      "selector": "button.button--quiet",
+      "label": "Download a sample sheet (Project base)",
+      "selector": "section.upload-card--project button.button--quiet",
       "screen": "upload",
       "notes": "Triggers an Excel download; we stub it away and just check no crash."
+    },
+    {
+      "id": "upload.lab.chooseFile",
+      "label": "Choose a file (Lab / Performance base)",
+      "selector": "section.upload-card--lab button.button--primary",
+      "screen": "upload",
+      "notes": "Opens the hidden file input of the lab card."
+    },
+    {
+      "id": "upload.lab.downloadSample",
+      "label": "Download a sample sheet (Lab / Performance base)",
+      "selector": "section.upload-card--lab button.button--quiet",
+      "screen": "upload",
+      "notes": "Triggers the lab sample's Excel download; we stub it away and just check no crash."
     },
     {
       "id": "singleCheck.submit",
@@ -65,14 +88,20 @@
       "label": "Replace sheet",
       "selector": "text=Replace sheet",
       "screen": "register",
-      "requires": { "hasSheet": true, "route": "#/" }
+      "requires": {
+        "hasSheet": true,
+        "route": "#/"
+      }
     },
     {
       "id": "register.columns",
       "label": "Columns",
       "selector": "text=Columns",
       "screen": "register",
-      "requires": { "hasSheet": true, "route": "#/" },
+      "requires": {
+        "hasSheet": true,
+        "route": "#/"
+      },
       "notes": "Opens the column picker; the picker itself is tested separately when triggered."
     },
     {
@@ -80,7 +109,10 @@
       "label": "Clear",
       "selector": "text=Clear",
       "screen": "register",
-      "requires": { "hasSheet": true, "route": "#/" },
+      "requires": {
+        "hasSheet": true,
+        "route": "#/"
+      },
       "notes": "First click — opens the confirm strip."
     },
     {
@@ -88,8 +120,13 @@
       "label": "Yes, remove",
       "selector": "text=Yes, remove",
       "screen": "register",
-      "requires": { "hasSheet": true, "route": "#/" },
-      "preClicks": ["text=Clear"],
+      "requires": {
+        "hasSheet": true,
+        "route": "#/"
+      },
+      "preClicks": [
+        "text=Clear"
+      ],
       "notes": "Second click after Clear — removes the sheet."
     },
     {
@@ -97,7 +134,10 @@
       "label": "Everyone",
       "selector": "text=Everyone",
       "screen": "register",
-      "requires": { "hasSheet": true, "route": "#/" },
+      "requires": {
+        "hasSheet": true,
+        "route": "#/"
+      },
       "notes": "Status filter chip that resets the filter to 'all'."
     },
     {
@@ -105,14 +145,20 @@
       "label": "Refresh",
       "selector": "text=Refresh",
       "screen": "register",
-      "requires": { "hasSheet": true, "route": "#/" }
+      "requires": {
+        "hasSheet": true,
+        "route": "#/"
+      }
     },
     {
       "id": "register.download",
       "label": "Download .xlsx",
       "selector": "text=Download .xlsx",
       "screen": "register",
-      "requires": { "hasSheet": true, "route": "#/" },
+      "requires": {
+        "hasSheet": true,
+        "route": "#/"
+      },
       "notes": "Reads first pushes + commits, then writes an Excel workbook; we stub the anchor click."
     },
     {
@@ -120,14 +166,20 @@
       "label": "Check commits",
       "selector": "text=Check commits",
       "screen": "register",
-      "requires": { "hasSheet": true, "route": "#/" }
+      "requires": {
+        "hasSheet": true,
+        "route": "#/"
+      }
     },
     {
       "id": "register.sort.id",
       "label": "sort: ID",
       "selector": "button.sort",
       "screen": "people-table",
-      "requires": { "hasSheet": true, "route": "#/" },
+      "requires": {
+        "hasSheet": true,
+        "route": "#/"
+      },
       "notes": "Click the first sort button (Row column). The full grid of sorts is exercised by this single click via aria-sort flips."
     },
     {
@@ -135,21 +187,58 @@
       "label": "Set deadline",
       "selector": "text=Set deadline",
       "screen": "deadline",
-      "requires": { "hasSheet": true, "route": "#/" }
+      "requires": {
+        "hasSheet": true,
+        "route": "#/"
+      }
     },
     {
       "id": "deadline.remove",
       "label": "Remove",
       "selector": "text=Remove",
       "screen": "deadline",
-      "requires": { "hasSheet": true, "route": "#/", "hasDeadline": true }
+      "requires": {
+        "hasSheet": true,
+        "route": "#/",
+        "hasDeadline": true
+      }
+    },
+    {
+      "id": "terms.final",
+      "label": "Final term",
+      "selector": "text=Final term",
+      "screen": "register",
+      "requires": {
+        "hasSheet": true,
+        "route": "#/",
+        "sheetKind": "lab"
+      },
+      "notes": "Switches a lab sheet to the Final term: its own deadline, rules and folder."
+    },
+    {
+      "id": "terms.mid",
+      "label": "Mid term",
+      "selector": "text=Mid term",
+      "screen": "register",
+      "requires": {
+        "hasSheet": true,
+        "route": "#/",
+        "sheetKind": "lab"
+      },
+      "preClicks": [
+        "text=Final term"
+      ],
+      "notes": "Switches back to the Mid term after Final."
     },
     {
       "id": "peopleTable.row.open",
       "label": "row click → person",
       "selector": "tr.entry",
       "screen": "people-table",
-      "requires": { "hasSheet": true, "route": "#/" },
+      "requires": {
+        "hasSheet": true,
+        "route": "#/"
+      },
       "notes": "Clicking anywhere on a row (outside links) navigates to that person."
     },
     {
@@ -157,14 +246,20 @@
       "label": "← Back to the register",
       "selector": "text=← Back to the register",
       "screen": "person",
-      "requires": { "hasSheet": true, "route": "#/p/r2" }
+      "requires": {
+        "hasSheet": true,
+        "route": "#/p/r2"
+      }
     },
     {
       "id": "person.pager.next",
       "label": "pager next",
       "selector": ".person__pager a:nth-of-type(1)",
       "screen": "person",
-      "requires": { "hasSheet": true, "route": "#/p/r2" },
+      "requires": {
+        "hasSheet": true,
+        "route": "#/p/r2"
+      },
       "notes": "The pager has Previous (or Next) depending on position. With row 2 selected, Next is present."
     },
     {
@@ -179,7 +274,10 @@
       "label": "← Back to the register",
       "selector": "text=← Back to the register",
       "screen": "similarity",
-      "requires": { "hasSheet": true, "route": "#/s" }
+      "requires": {
+        "hasSheet": true,
+        "route": "#/s"
+      }
     }
   ]
 }

@@ -2,9 +2,9 @@
 
 This is the long version. It documents every column, every status, every rule,
 the API, the build, and the limits, for both **project base** and
-**performance base** sheets. The short overview lives in the project
-[README](../README.md); the deduction rules in detail live in
-[GRADING.md](GRADING.md).
+**lab / performance base** sheets. The short overview lives in the project
+[README](../README.md); marking (the rules table, the bonus, Mid and Final)
+in detail lives in [GRADING.md](GRADING.md).
 
 The similarity module has its own design log in
 [../SIMILARITY.md](../SIMILARITY.md). It is iterated on, not a one-shot
@@ -20,12 +20,8 @@ spec.
   - [Statuses](#statuses)
   - [The Person page](#the-person-page)
   - [Downloading the report](#downloading-the-report)
-- [Performance base — grades](#performance-base--grades)
-  - [Columns](#columns-1)
-  - [The grading box](#the-grading-box)
-  - [Statuses on a performance sheet](#statuses-on-a-performance-sheet)
-  - [Downloading the report](#downloading-the-report-1)
-- [Auto-detection and the escape hatch](#auto-detection-and-the-escape-hatch)
+- [Lab / Performance base — Mid and Final](#lab--performance-base--mid-and-final)
+- [Marking](#marking)
 - [Persistence and privacy](#persistence-and-privacy)
 - [The Worker (the API)](#the-worker-the-api)
 - [Build, test, lint, deploy](#build-test-lint-deploy)
@@ -35,23 +31,21 @@ spec.
 
 ## The two sheet types
 
-A teacher uploads **one** sheet at a time. The page auto-detects which kind
-it is, and routes to the right screen:
+The home page has **two uploads**, one per kind of sheet. The teacher chooses;
+nothing is guessed. A file dropped on (or chosen from) a card is read as that
+card's kind.
 
-| Kind | Has | The page shows | Reports |
+| Kind | The sheet has | Each repo holds | Judged against |
 | --- | --- | --- | --- |
-| **Project base** | `id`, `name`, `repolink` | The register: who pushed in time, who did not, which files, which repos | Results, Summary, Needs attention, Same repo, Info |
-| **Performance base** | `id`, `name`, one or more numeric mark columns | The performance register: original marks, status, final mark, deduction breakdown | Results, Summary, Info |
+| **Project base** | `id`, `name`, `repolink` | the project | one deadline, the whole repo |
+| **Lab / Performance base** | `id`, `name`, `repolink`, and any other columns (earlier marks, a section) | a `Mid` folder and a `Final` folder of lab tasks | one deadline per term, that term's folder only |
 
-Detection rules: if the sheet has a recognisable GitHub link column, it is
-treated as a project base. If it has no link column but at least one
-numeric mark column, it is treated as a performance base. The auto-detect
-is usually right; if it is not, the upload panel shows a "Switch sheet
-type" button. See [Auto-detection](#auto-detection-and-the-escape-hatch).
+Both kinds open the same register, with the Similarity and Contribution tabs,
+the rules table and the Bonus and Final mark columns. A lab sheet adds the
+Mid / Final switch, a Lab tasks column and its own columns.
 
-Only one sheet kind is in memory at a time. Uploading a new sheet
-replaces the current one; the kind is preserved on reload, the rules are
-preserved on reload.
+**Replace sheet** reads the new file as the same kind. To change kind, press
+Clear and use the other card. Each card has its own sample sheet.
 
 ---
 
@@ -111,9 +105,8 @@ Clicking a row opens a per-student page with:
 - Notes that explain the status in words ("Link could not be read",
   "Same repo as another row", "Repo was renamed or moved", etc.).
 
-The Person page is only relevant for project base. For a performance
-sheet, the row links to the same view but it just says "this is a
-performance sheet" because there is no repo to open.
+On a lab sheet the status at the top is the term's (judged by its folder);
+the timeline still shows every push to the repo.
 
 ### Downloading the report
 
@@ -122,132 +115,73 @@ following sheets:
 
 | Sheet | Contents |
 | --- | --- |
-| **Results** | One row per student: row number, id, name, repo URL, repo name, status, first push, last push, commits, branch, notes. Coloured to match the page. |
+| **Results** | One row per student, in the register's columns, then who committed, padding commits and branches, then the marks: Deduction, Bonus, Final mark. A lab sheet adds Term folder, Lab tasks and its own columns before the marks. "Late by" is spelled out ("2 days 4 hours 15 minutes"). Coloured to match the page. |
 | **Summary** | Counts by status, totals, the sheet name, the deadline, the time the report was generated. |
 | **Needs attention** | Only the rows whose status needs the teacher's eyes. |
 | **Same repo** | One row per group of students that handed in the same GitHub repo. |
-| **Info** | The source sheet, the deadline (in UTC and in the browser's zone), the rules used, the Worker URL. |
+| **Info** | The source sheet, the deadline, the time zone, how lateness is judged, the kind of sheet (and term), the rules table the marks were made with, and what each status means. |
 
 File name: `register-YYYY-MM-DD-HHMM.xlsx` in the browser's local zone.
 
 ---
 
-## Performance base — grades
+## Lab / Performance base — Mid and Final
 
-### Columns
+Each student keeps one repo with a folder per term at its top:
 
-The same header rules apply. Two columns are required (`id`, `name`); the
-rest are **mark columns**. The app decides a column is a mark column
-when at least three cells in it parse as finite numbers and the header
-is not one of `id`, `name`, `link`, `repolink`, `repo`, `github`,
-`branch`, `branches`, `notes`, `comment`, `comments`, or empty.
+```
+repo/
+  Mid/      Lab 1/  Lab 2/  Lab 3/
+  Final/    Lab 4/  Lab 5/
+```
 
-A mark column is shown under its own header, in the order the sheet has
-them. Its cells are written back to the report as they were typed (so a
-`"30"` is exported as `"30"`, not as `30`).
+The register's **Mid term / Final term** switch picks the term being marked.
+Each term keeps its own deadline, rules table and bonuses; switching back
+brings them back. A row is judged by **that term's folder only**, so Final
+work pushed after the Mid deadline leaves Mid on time. The folder names that
+count, the table of cases and how the pushes are dated are in
+[GRADING.md](GRADING.md#a-lab-sheet-mid-and-final).
 
-The sheet is capped at **1,000 rows**. Larger sheets are truncated and
-the upload panel says so.
+The sheet's other columns (anything that is not the ID, the name or the
+link, up to 12) are carried along: shown in the register after the lab tasks
+and written into the file, numbers as numbers. A cell that starts with `=`
+stays text; nothing is ever written as a formula.
 
-### The grading box
-
-Three inputs live above the table, like the existing deadline box:
-
-| Field | Default | What it does |
-| --- | --- | --- |
-| **Total mark** | empty | The ceiling the final mark is clamped to. Leave empty to clamp only at 0. |
-| **Marks off for late** | `0` | Subtracted from each late row. |
-| **Marks off for changed after deadline** | `0` | Subtracted from each row that pushed both before and after the deadline. |
-
-Pressing **Apply** saves the rules to localStorage. The table and the
-download update immediately. A small state line under the box says the
-current rules in plain English.
-
-If the teacher types a negative or non-numeric value, the box rejects
-the change, restores the previous rule, and shows a one-line error.
-
-### Statuses on a performance sheet
-
-If the sheet also has a `repolink` column, the status is the same as
-for a project base (see above), and the deductions apply. If the sheet
-has no link column, every row's status is `not_applicable`, the Status
-column reads **Not graded**, and the Final mark equals the original
-mark with no deduction.
-
-The four deduction cases are detailed in [GRADING.md](GRADING.md). A
-short version:
-
-- `on_time` / `has_work` / `not_applicable` — no deduction.
-- `late` — `−offForLate`.
-- `changed_after` — `−offForChanged`.
-- `no_submission` / `not_found` / `invalid_link` / `check_failed` —
-  final mark is `0`, the original is shown next to it.
-
-The `final` mark is clamped to `[0, totalMark]`. A `null` mark (an
-empty cell) stays `null` through the function; the report exports it
-as an empty cell.
-
-### Downloading the report
-
-The "Download .xlsx" button writes:
-
-| Sheet | Contents |
-| --- | --- |
-| **Results** | One row per student: row number, id, name, every mark column (as typed), the total of the marks, the status, the final mark, the deduction lines (joined into one cell). |
-| **Summary** | Counts by status, the sheet name, the rules, the time the report was generated. |
-| **Info** | The source sheet, the rules, the deadline, the Worker's URL. |
-
-File name: `performance-YYYY-MM-DD-HHMM.xlsx` in the browser's local
-zone.
+The page reads each term folder one level at a time, by commit hash
+(`/api/v1/tree?flat=1`): the head commit, the commit at the deadline and, only
+when the folder changed, a few pushes found by halving. These answers never
+change, so the Worker and the page keep them.
 
 ---
 
-## Auto-detection and the escape hatch
+## Marking
 
-The detector lives in [`src/sheet/kind.ts`](../src/sheet/kind.ts).
-It is a pure function called from
-[`detectMapping`](../src/sheet/columns.ts) right after the header
-row is read.
-
-The rules, in order:
-
-1. **Has a link column.** The sheet has a column whose header matches
-   one of the link hints **and** at least one cell in that column
-   parses as a GitHub URL → **project**.
-2. **No link column, has a mark column.** At least one column is not
-   `id`/`name`/`link` and has three or more cells that parse as
-   finite numbers → **performance**.
-3. **Neither.** The app falls back to **project**, and the
-   `ColumnPicker` shows a yellow note that the mapping may be wrong.
-
-When the auto-detect is wrong — a performance sheet happens to have
-a link in a notes column, say — the upload panel shows a small
-"Switch sheet type" link. Clicking it re-runs the detector with the
-opposite kind, preserves the column choices, and routes to the new
-screen.
-
-The kind is persisted to localStorage next to the sheet, the mapping,
-and the deadline, so reloading the page keeps the right screen open.
+Both kinds have a **Marking rules** box (total mark, marks off for late, marks
+off for changed after deadline, mark for no submission), in force as it is
+typed, and a **Bonus** box on every row, with Enter moving to the next
+student. The final mark is the total, minus the rule for the row's status,
+plus the bonus, kept between 0 and the total; a row whose check failed gets
+no mark. The full rules, with a worked example, are in
+[GRADING.md](GRADING.md).
 
 ---
 
 ## Persistence and privacy
 
-The page stores **only** what fits in localStorage:
+The page keeps in this browser's localStorage, under one key:
 
-- The chosen `kind` and the column mapping.
-- The last deadline, the last grading rules.
-- The status of each row (`checking` / `done` / `failed`).
-- A few UI preferences (active tab, sort order, filter text).
+- The sheet's rows (row number, ID, name, the link as typed) and, for a lab
+  sheet, its carried columns. The file itself is not kept.
+- The kind of sheet and, for a lab sheet, the term being marked.
+- The deadline and the rules table of the project, of Mid and of Final.
+- Every bonus, by term and student ID.
+- The sort order.
 
-The sheet itself is **not** stored. Re-uploading the same sheet from
-the same name restores the mapping and the deadline, but the file
-itself has to be picked again.
+What is read back is checked: a value of the wrong type or out of range is
+dropped, never used. **Clear** removes all of it.
 
-No name, id, repo link, or mark is sent to a server by the page.
-The Worker, when it has a token, makes the GitHub calls for the
-teacher; the responses come back to the browser. The Worker is on
-the same origin as the page; CORS is not in the way.
+No name, ID, mark or bonus is sent to a server. The page asks the Worker
+only about repos: their facts, their push logs, their files and folders.
 
 ---
 
@@ -309,8 +243,8 @@ manager is npm; the lockfile is `package-lock.json`.
 
 ## Limits and known quirks
 
-- **1,000-row cap.** The performance register caps the sheet at
-  1,000 rows. Larger sheets are truncated; the upload panel says so.
+- **1,000-row cap.** The register reads the first 1,000 people of a
+  sheet. Larger sheets are cut; the register says so.
 - **Same-origin only.** The Worker must live on the same origin as
   the page, or the page will fall back to anonymous GitHub calls
   and lose the rate-limit headroom.
@@ -328,16 +262,13 @@ manager is npm; the lockfile is `package-lock.json`.
   "Cannot tell" whenever the evidence does not prove a direction
   (see [../SIMILARITY.md](../SIMILARITY.md) for the design log). A
   wrong accusation is the failure to avoid.
-- **Two cells per row, not one.** The Results sheet exports every
-  original mark in its own column, then adds a `Final mark` and a
-  `Deduction` column. The Deduction cell is a single cell with the
-  lines joined by `; `, so it is sortable in Excel without parsing
-  the lines.
+- **Term folders sit at the top of the repo.** A `Mid` folder inside
+  another folder is not found, and the row reads "No submission" with
+  "No folder for this term in the repo".
 - **Local time in the file name, UTC in the cell.** The downloaded
   workbook's file name uses the browser's local zone (so two teachers
   in two zones do not collide on the same minute), but the cells
   inside the workbook are UTC. The Info sheet records both.
 
-For the deduction rules in full, see
-[GRADING.md](GRADING.md). For the long-running iteration log on the
+For marking in full, see [GRADING.md](GRADING.md). For the long-running iteration log on the
 similarity checker, see [../SIMILARITY.md](../SIMILARITY.md).

@@ -33,6 +33,10 @@ export type Note =
   | 'default_branch_created_late'
   | 'many_pushes_after_deadline'
   | 'by_commit_date'
+  // Lab sheets, where each term has its own folder (termFolder.ts).
+  | 'term_folder_missing'
+  | 'term_folder_removed'
+  | 'term_untouched_after_deadline'
 
 export type ActivityData = {
   /** Push events on the default branch, newest first. */
@@ -228,4 +232,7 @@ export const NOTE_TEXT: Record<Note, string> = {
   default_branch_created_late: 'Main branch was created after the deadline',
   many_pushes_after_deadline: 'Very many pushes after the deadline',
   by_commit_date: 'GitHub has no push log for this repo; judged by commit date',
+  term_folder_missing: 'No folder for this term in the repo',
+  term_folder_removed: "The term's folder was removed after the deadline",
+  term_untouched_after_deadline: "Pushed after the deadline, but not to this term's folder",
 }

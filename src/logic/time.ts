@@ -85,6 +85,21 @@ export function formatDuration(ms: number): string {
   return hours % 24 === 0 ? `${days}d` : `${days}d ${hours % 24}h`
 }
 
+/** "2 days 4 hours 15 minutes": every part spelled out, for the downloaded file. Rounds down. */
+export function formatDurationLong(ms: number): string {
+  const minutes = Math.floor(Math.abs(ms) / 60_000)
+  if (minutes < 1) return 'under 1 minute'
+  const parts: Array<[number, string]> = [
+    [Math.floor(minutes / 1440), 'day'],
+    [Math.floor(minutes / 60) % 24, 'hour'],
+    [minutes % 60, 'minute'],
+  ]
+  return parts
+    .filter(([count]) => count > 0)
+    .map(([count, unit]) => `${count} ${unit}${count === 1 ? '' : 's'}`)
+    .join(' ')
+}
+
 /** "Asia/Dhaka (UTC+6)" */
 export function zoneLabel(now: Date = new Date()): string {
   const offset = -now.getTimezoneOffset()

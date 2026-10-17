@@ -1,15 +1,19 @@
+import { TERM_LABEL } from '../logic/termFolder.ts'
 import { formatDateTime, formatDuration, parseDeadlineInput } from '../logic/time.ts'
 import { useApp, useNow } from '../state/hooks.ts'
 import { applyDeadline, setDeadlineInput } from '../state/store.ts'
 
 /**
- * The one deadline for the whole sheet. It takes effect on the button, not while
- * typing, because moving it can start downloads for every row.
+ * The deadline of the sheet, or of the term being marked on a lab sheet. It
+ * takes effect on the button, not while typing, because moving it can start
+ * downloads for every row.
  */
 export function DeadlineBox() {
   const input = useApp((state) => state.deadlineInput)
   const deadline = useApp((state) => state.deadline)
   const shifted = useApp((state) => state.deadlineShifted)
+  const lab = useApp((state) => state.sheet?.kind === 'lab')
+  const term = useApp((state) => state.term)
   const now = useNow()
 
   const typed = input ? (parseDeadlineInput(input)?.ms ?? null) : null
@@ -26,7 +30,7 @@ export function DeadlineBox() {
     >
       <div className="deadline__field">
         <label className="deadline__label" htmlFor="deadline-input">
-          Deadline
+          {lab ? `${TERM_LABEL[term]} deadline` : 'Deadline'}
         </label>
         <input
           id="deadline-input"

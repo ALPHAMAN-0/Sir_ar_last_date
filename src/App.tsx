@@ -1,7 +1,6 @@
 import { ContributionView } from './components/ContributionView.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { Logo } from './components/Logo.tsx'
-import { PerformanceRegister } from './components/PerformanceRegister.tsx'
 import { PersonView } from './components/PersonView.tsx'
 import { Register } from './components/Register.tsx'
 import { SimilarityView } from './components/SimilarityView.tsx'
@@ -25,10 +24,9 @@ export default function App() {
         <p className="masthead__tag">
           {kind === 'project'
             ? 'A submission register for GitHub repos. Who pushed in time, who did not, and what changed.'
-            : 'A performance register. Marks and grades, with auto deductions for late or changed submissions.'}
-          <br />
+            : 'A lab register for GitHub repos. Mid and Final are each judged by their own folder, and marked.'}
         </p>
-        {hasSheet && kind === 'project' ? (
+        {hasSheet ? (
           <nav className="masthead__nav" aria-label="Tabs">
             <a
               className={`masthead__tab${route.kind === 'register' || route.kind === 'person' ? ' masthead__tab--on' : ''}`}
@@ -56,8 +54,6 @@ export default function App() {
         <ErrorBoundary>
           {!hasSheet ? (
             <UploadPanel />
-          ) : kind === 'performance' ? (
-            <PerformanceRegister />
           ) : route.kind === 'person' ? (
             <PersonView rowId={route.rowId} />
           ) : route.kind === 'similarity' ? (

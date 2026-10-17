@@ -11,9 +11,11 @@ import {
 import { formatDateTime, zoneLabel } from '../logic/time.ts'
 import { loadCommitShares } from '../state/commitShares.ts'
 import { loadFirstPushes } from '../state/firstPushes.ts'
+import type { SheetRow } from '../sheet/columns.ts'
 import { useApp, useNow, usePeople } from '../state/hooks.ts'
 import { loadPadding, type PaddingProgress } from '../state/padding.ts'
 import {
+  bonusOf,
   clearSheet,
   currentPeople,
   getState,
@@ -24,8 +26,12 @@ import {
 } from '../state/store.ts'
 import { ColumnPicker } from './ColumnPicker.tsx'
 import { DeadlineBox } from './DeadlineBox.tsx'
+import { MarkingBox } from './MarkingBox.tsx'
 import { PauseNotice } from './PauseNotice.tsx'
 import { PeopleTable } from './PeopleTable.tsx'
+import { TermPicker } from './TermPicker.tsx'
+
+const KIND_LABEL = { project: 'Project base', lab: 'Lab / Performance base' } as const
 
 export function Register() {
   const sheet = useApp((state) => state.sheet)
@@ -36,6 +42,7 @@ export function Register() {
   const loadingRepos = useApp((state) => state.loadingRepos)
   const checkedAt = useApp((state) => state.checkedAt)
   const quota = useApp((state) => state.quota)
+  const rules = useApp((state) => state.rules)
   const canPickColumns = useApp((state) => state.columns !== null)
   const people = usePeople()
   const now = useNow()
@@ -89,14 +96,18 @@ export function Register() {
         statusFilter === 'all' ? '' : `Status: ${statusLabel(statusFilter, passed)}`,
         search.trim() ? `search: "${search.trim()}"` : '',
       ].filter(Boolean)
+      // The marks as they are now: the rules and bonuses in force when the file is written.
+      const marking = { rules: latest.rules, bonusOf: (row: SheetRow) => bonusOf(row, latest) }
       excel.downloadWorkbook(
-        excel.buildWorkbook(toExportRows(rows, passed, firstPushes, commitShares), {
+        excel.buildWorkbook(toExportRows(rows, passed, firstPushes, commitShares, marking), {
           sheetName: sheet.fileName,
           deadline: latest.deadline,
           checkedAt: latest.checkedAt ?? stamp,
           zone: zoneLabel(),
           totalPeople: latest.sheet.rows.length,
           filter: filters.length > 0 ? `filtered by ${filters.join(', ')}` : null,
+          rules: latest.rules,
+          lab: sheet.kind === 'lab' ? { term: latest.term, extraHeaders: sheet.extraHeaders } : undefined,
         }),
         excel.exportFileName(stamp),
       )
@@ -126,6 +137,7 @@ export function Register() {
           <span className="sheetbar__count">
             {people.length} {people.length === 1 ? 'person' : 'people'}
           </span>
+          <span className={`sheetbar__kind sheetbar__kind--${sheet.kind}`}>{KIND_LABEL[sheet.kind]}</span>
         </div>
         <div className="sheetbar__actions">
           <button
@@ -171,7 +183,8 @@ export function Register() {
             aria-label="Choose another Excel or CSV file"
             onChange={(event) => {
               const file = event.target.files?.[0]
-              if (file) void loadFile(file)
+              // A new version of the same class: the same kind of sheet.
+              if (file) void loadFile(file, sheet.kind)
               event.target.value = ''
             }}
           />
@@ -194,7 +207,11 @@ export function Register() {
         </p>
       ) : null}
 
+      {sheet.kind === 'lab' ? <TermPicker /> : null}
+
       <DeadlineBox />
+
+      <MarkingBox />
 
       <PauseNotice />
 
@@ -282,7 +299,14 @@ export function Register() {
       ) : null}
 
       {shown.length > 0 ? (
-        <PeopleTable people={shown} sort={sort} deadlinePassed={deadlinePassed} />
+        <PeopleTable
+          people={shown}
+          sort={sort}
+          deadlinePassed={deadlinePassed}
+          kind={sheet.kind}
+          rules={rules}
+          extraHeaders={sheet.extraHeaders}
+        />
       ) : (
         <p className="empty">
           Nobody matches this filter.{' '}

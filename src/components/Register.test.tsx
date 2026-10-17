@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as XLSX from 'xlsx'
 import type { CommitFilesResponse, CommitInfo } from '../../shared/api.ts'
 import { ZERO_OID } from '../../shared/validate.ts'
-import { formatDateTime, formatDuration, parseDeadlineInput } from '../logic/time.ts'
+import { formatDateTime, formatDuration, formatDurationLong, parseDeadlineInput } from '../logic/time.ts'
 import { excelDate } from '../sheet/exportXlsx.ts'
 import {
   FETCHED_AT,
@@ -201,7 +201,9 @@ describe('the register', () => {
 
       const results = XLSX.read(saved[0].bytes, { type: 'array' }).Sheets.Results
       const header = XLSX.utils.sheet_to_json<string[]>(results, { header: 1 })[0]
-      expect(header.slice(-4)).toEqual(['Commits by person', 'Padding commits', 'Branches', 'Branch names'])
+      expect(header.slice(14, 18)).toEqual(['Commits by person', 'Padding commits', 'Branches', 'Branch names'])
+      // The marks come after them, so no earlier column moved.
+      expect(header.slice(18)).toEqual(['Deduction', 'Bonus', 'Final mark'])
       // On screen order: Nusrat, Rahim, then the two rows without a repo.
       expect([results.O2.v, results.O3.v]).toEqual(['nusrat 1 (100%)', 'rahim 2 (67%, 1 merge); nusrat 1 (33%)'])
       expect([results.O4?.v ?? '', results.O5?.v ?? '']).toEqual(['', ''])
@@ -613,8 +615,9 @@ describe('the register with a deadline', () => {
       const [header, ...rows] = grid('Results')
       expect(header.slice(0, 9)).toEqual(['Row', 'ID', 'Name', 'Repo', 'Status', 'Late by', 'Repo created', 'First push', 'Last push'])
       expect(rows.map((line) => line.slice(2, 9))).toEqual([
-        ['Nusrat Jahan', 'octocat/spoon-knife', 'Changed after deadline', formatDuration(9 * 3_600_000), formatDateTime('2026-09-01T08:00:00Z'), formatDateTime(at(-1440)), formatDateTime(at(540))],
-        ['Salma Akter', 'salma/late-start', 'Late', '3h 19m', formatDateTime(at(120)), formatDateTime(at(199)), formatDateTime(at(199))],
+        // The file spells out how late: "9 hours", "3 hours 19 minutes".
+        ['Nusrat Jahan', 'octocat/spoon-knife', 'Changed after deadline', formatDurationLong(9 * 3_600_000), formatDateTime('2026-09-01T08:00:00Z'), formatDateTime(at(-1440)), formatDateTime(at(540))],
+        ['Salma Akter', 'salma/late-start', 'Late', '3 hours 19 minutes', formatDateTime(at(120)), formatDateTime(at(199)), formatDateTime(at(199))],
         ['Rahim Uddin', 'octocat/hello-world', 'On time', '', formatDateTime('2026-09-01T08:00:00Z'), `${formatDateTime(at(-700))} (commit date)`, formatDateTime(at(-600))],
       ])
       for (const name of ['Results', 'Needs attention']) expect(grid(name)[0], name).not.toContain('Notes')

@@ -40,6 +40,9 @@ const row = (over: Partial<ExportRow> = {}): ExportRow => ({
   branch: 'main',
   commitShares: { kind: 'counted', total: 12, truncated: false, authors: [{ who: 'rahim', login: 'rahim', commits: 12, merges: 0 }] },
   branches: { total: 1, names: ['main'] },
+  markRule: '',
+  bonus: null,
+  finalMark: null,
   ...over,
 })
 
@@ -95,6 +98,7 @@ describe('the results report', () => {
     expect(roundTrip([row()]).grid('Results')[0]).toEqual([
       'Row', 'ID', 'Name', 'Repo', 'Status', 'Late by', 'Repo created', 'First push', 'Last push', 'Last commit', 'Commits',
       'Late (minutes)', 'Last on-time push', 'Branch', 'Commits by person', 'Padding commits', 'Branches', 'Branch names',
+      'Deduction', 'Bonus', 'Final mark',
     ])
   })
 
@@ -159,17 +163,17 @@ describe('the results report', () => {
     expect(fill(results.E7)).toBe('E6E6E6') // Invalid link
     const xml = sheetXml(bytes, 1)
     expect(xml).toContain('state="frozen"')
-    expect(xml).toContain('<autoFilter ref="A1:R9"/>')
+    expect(xml).toContain('<autoFilter ref="A1:U9"/>')
   })
 
   it('colours the whole row of a person, blank cells and dates included', () => {
     process.env.TZ = 'Asia/Dhaka'
     const { results } = roundTrip(klass)
-    expect(rowFills(results, 2, 'R')).toEqual(['D4EFDB']) // On time
-    expect(rowFills(results, 5, 'R')).toEqual(['F6CDC8']) // Late
-    expect(rowFills(results, 6, 'R')).toEqual(['FBE6B3']) // Changed after deadline
-    expect(rowFills(results, 7, 'R')).toEqual(['E6E6E6']) // Invalid link
-    expect(rowFills(results, 8, 'R')).toEqual(['E6E6E6']) // Not found
+    expect(rowFills(results, 2, 'U')).toEqual(['D4EFDB']) // On time
+    expect(rowFills(results, 5, 'U')).toEqual(['F6CDC8']) // Late
+    expect(rowFills(results, 6, 'U')).toEqual(['FBE6B3']) // Changed after deadline
+    expect(rowFills(results, 7, 'U')).toEqual(['E6E6E6']) // Invalid link
+    expect(rowFills(results, 8, 'U')).toEqual(['E6E6E6']) // Not found
     // A coloured date is still a date, and a coloured link still a link.
     expect(results.I5.w).toBe('05 Oct 2026, 21:10')
     expect(results.D5.l?.Target).toBe('https://github.com/x/A4')
@@ -181,9 +185,9 @@ describe('the results report', () => {
       row({ status: 'Has work', statusKey: 'submitted' }),
       row({ status: 'Checking', statusKey: 'checking' }),
     ])
-    expect(rowFills(results, 2, 'R')).toEqual(['F6CDC8'])
-    expect(rowFills(results, 3, 'R')).toEqual(['DCE8F7'])
-    expect(rowFills(results, 4, 'R')).toEqual([undefined])
+    expect(rowFills(results, 2, 'U')).toEqual(['F6CDC8'])
+    expect(rowFills(results, 3, 'U')).toEqual(['DCE8F7'])
+    expect(rowFills(results, 4, 'U')).toEqual([undefined])
   })
 
   it('colours whole rows on the "Needs attention" sheet too', () => {
@@ -461,5 +465,72 @@ describe('helpers', () => {
     const [bytes, name] = save.mock.calls[0]
     expect(name).toBe('results.xlsx')
     expect(XLSX.read(bytes, { type: 'array' }).SheetNames[0]).toBe('Results')
+  })
+})
+
+describe('marks in the results report', () => {
+  const RULES = { total: 10, late: 2, changed: 1, noSubmission: 0 }
+  const marked: ExportRow[] = [
+    row({ rowNumber: 2, name: 'Rahim', finalMark: 10, bonus: 1 }),
+    row({ rowNumber: 3, name: 'Farhana', status: 'Late', statusKey: 'late', lateBy: '2 days 4 hours', finalMark: 8.5, bonus: 0.5, markRule: 'Late −2' }),
+    row({ rowNumber: 4, name: 'Karim', status: 'Check failed', statusKey: 'check_failed' }),
+  ]
+
+  it('adds the deduction, the bonus and the final mark after every other column, as numbers', () => {
+    const { grid, results } = roundTrip(marked, { ...info, rules: RULES })
+    const header = grid('Results')[0]
+    expect(header.slice(-3)).toEqual(['Deduction', 'Bonus', 'Final mark'])
+    expect(header.indexOf('Branch names')).toBe(header.length - 4)
+    expect(grid('Results').slice(1).map((line) => line.slice(-3))).toEqual([
+      ['', 1, 10],
+      ['Late −2', 0.5, 8.5],
+      ['', '', ''],
+    ])
+    expect(results.U3).toMatchObject({ t: 'n', v: 8.5 })
+  })
+
+  it('spells out how late a row was, so it reads without a legend', () => {
+    expect(roundTrip(marked).grid('Results')[2][5]).toBe('2 days 4 hours')
+  })
+
+  it('records the rules table on the Info sheet', () => {
+    const lines = roundTrip(marked, { ...info, rules: RULES }).grid('Info')
+    const value = (label: string) => lines.find((line) => line[0] === label)?.[1]
+    expect(value('Sheet')).toBe('Project base: one repo, one deadline')
+    expect(value('Total mark')).toBe(10)
+    expect(value('Marks off for late')).toBe(2)
+    expect(value('Marks off for changed after deadline')).toBe(1)
+    expect(value('Mark for no submission')).toBe(0)
+    expect(value('Final mark')).toContain('never above the total')
+  })
+
+  it('says so when no total was set', () => {
+    const lines = roundTrip(marked, { ...info, rules: { total: null, late: 0, changed: 0, noSubmission: 0 } }).grid('Info')
+    expect(lines.find((line) => line[0] === 'Total mark')?.[1]).toBe('Not set, so no final marks')
+  })
+
+  it("adds a lab sheet's term folder, lab tasks and carried columns before the marks", () => {
+    const lab: ExportRow[] = [
+      row({ name: 'Rahim', labFolder: 'Mid', labTasks: ['Lab 1', 'Lab 2'], extra: ['8', '=1+1', 'A'], finalMark: 10 }),
+      row({ name: 'Karim', labFolder: null, labTasks: null, extra: ['', '7.5', 'B'], statusKey: 'no_submission', status: 'No submission' }),
+    ]
+    const { grid, results } = roundTrip(lab, {
+      ...info,
+      rules: RULES,
+      lab: { term: 'mid', extraHeaders: ['Lab 1', 'Lab 2', 'Section'] },
+    })
+    const [header, ...lines] = grid('Results')
+    expect(header.slice(-8)).toEqual(['Term folder', 'Lab tasks', 'Lab 1', 'Lab 2', 'Section', 'Deduction', 'Bonus', 'Final mark'])
+    expect(lines.map((line) => line.slice(-8, -3))).toEqual([
+      ['Mid', '2: Lab 1, Lab 2', 8, '=1+1', 'A'],
+      ['No Mid term folder', '', '', 7.5, 'B'],
+    ])
+    // A carried cell is never a formula, whatever it starts with.
+    const formulaCell = Object.values(results).find((cell) => (cell as XLSX.CellObject).v === '=1+1') as XLSX.CellObject
+    expect(formulaCell.t).toBe('s')
+    expect(formulaCell.f).toBeUndefined()
+    const value = (label: string) => grid('Info').find((line) => line[0] === label)?.[1]
+    expect(value('Sheet')).toBe('Lab / Performance base: Mid term')
+    expect(value('How a term is judged')).toContain('Mid folder')
   })
 })

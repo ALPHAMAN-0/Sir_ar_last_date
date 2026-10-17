@@ -12,7 +12,10 @@ import type { RepoBranches } from '../../shared/api.ts'
 import { branchNamesText } from '../logic/branches.ts'
 import { commitSharesText, paddingCommits, type CommitShares } from '../logic/commitShares.ts'
 import { firstPushText, type FirstPush } from '../logic/firstPush.ts'
+import type { SheetKind } from './columns.ts'
+import type { Rules } from '../logic/marking.ts'
 import { STATUS_TONE } from '../logic/people.ts'
+import { TERM_LABEL, type Term } from '../logic/termFolder.ts'
 import type { Status } from '../logic/verdict.ts'
 import { headerCells, saveFile, writeStyledXlsx, type Paint, type SheetStyle } from './xlsxStyle.ts'
 
@@ -42,6 +45,18 @@ export type ExportRow = {
   commitShares: CommitShares
   /** How many branches the repo has, and up to 100 of their names. Null when not known, or without work. */
   branches: RepoBranches | null
+  /** What the rules table did to the row, e.g. "Late −2". Empty when nothing. */
+  markRule: string
+  /** The teacher's bonus for the student, or null for none. */
+  bonus: number | null
+  /** The final mark, or null when none can be given (no total set, or the check failed). */
+  finalMark: number | null
+  /** A lab sheet's term folder at the head commit, or null when there is none. */
+  labFolder?: string | null
+  /** The lab tasks in that folder; null when they are unknown or there is no folder. */
+  labTasks?: readonly string[] | null
+  /** A lab sheet's carried columns, as the sheet holds them. */
+  extra?: readonly string[]
 }
 
 export type ExportInfo = {
@@ -55,6 +70,10 @@ export type ExportInfo = {
   totalPeople?: number
   /** What the register was filtered by, e.g. "Status: Late". */
   filter?: string | null
+  /** The rules table in force when the file was made. */
+  rules?: Rules
+  /** Set for a lab sheet: the term being marked, and the headers of the carried columns. */
+  lab?: { term: Term; extraHeaders: readonly string[] }
 }
 
 export type ResultsReport = { book: XLSX.WorkBook; styles: SheetStyle[] }
@@ -162,7 +181,8 @@ const RESULT_COLUMNS: ReadonlyArray<Column<ExportRow>> = [
   { title: 'Name', width: 26, cell: (row) => text(row.name) },
   { title: 'Repo', width: 34, cell: repo },
   { title: 'Status', width: 24, cell: (row) => text(row.status) },
-  { title: 'Late by', width: 12, cell: (row) => text(row.lateBy) },
+  // Wide enough for "12 days 23 hours 59 minutes".
+  { title: 'Late by', width: 27, cell: (row) => text(row.lateBy) },
   { title: 'Repo created', width: 21, cell: (row) => excelDate(row.repoCreatedAt) },
   // Wide enough for a marked commit date: Excel shows a date that does not fit as "####".
   { title: 'First push', width: 33, cell: firstPushCell },
@@ -181,6 +201,50 @@ const RESULT_COLUMNS: ReadonlyArray<Column<ExportRow>> = [
   { title: 'Branches', width: 10, cell: (row) => number(row.branches?.total ?? null) },
   { title: 'Branch names', width: 50, cell: (row) => text(branchNamesText(row.branches, row.branch)) },
 ]
+
+/** A carried cell: a number stays a number (so the class can be summed), anything else is text, never a formula. */
+const carried = (value: string | undefined): XLSX.CellObject => {
+  const clean = (value ?? '').trim()
+  return /^-?\d+(\.\d+)?$/.test(clean) ? number(Number(clean)) : text(value ?? '')
+}
+
+/** "2: Lab 1, Lab 2"; blank when the tasks are not known. */
+const labTasksText = (tasks: readonly string[] | null | undefined): string =>
+  tasks ? `${tasks.length}${tasks.length > 0 ? `: ${tasks.join(', ')}` : ''}` : ''
+
+/**
+ * The Results columns: the register's own, then for a lab sheet the term folder,
+ * its lab tasks and the sheet's carried columns, then the marks. Everything new
+ * goes after the existing columns, so none of them moves.
+ */
+function resultColumns(info: ExportInfo): Array<Column<ExportRow>> {
+  const lab = info.lab
+  const labColumns: Array<Column<ExportRow>> = lab
+    ? [
+        {
+          title: 'Term folder',
+          width: 22,
+          cell: (row) =>
+            text(row.labFolder ?? (row.statusKey === 'no_submission' ? `No ${TERM_LABEL[lab.term]} folder` : '')),
+        },
+        { title: 'Lab tasks', width: 40, cell: (row) => text(labTasksText(row.labTasks)) },
+        ...lab.extraHeaders.map(
+          (title, index): Column<ExportRow> => ({
+            title,
+            width: Math.min(30, Math.max(10, title.length + 2)),
+            cell: (row) => carried(row.extra?.[index]),
+          }),
+        ),
+      ]
+    : []
+  return [
+    ...RESULT_COLUMNS,
+    ...labColumns,
+    { title: 'Deduction', width: 28, cell: (row) => text(row.markRule) },
+    { title: 'Bonus', width: 8, cell: (row) => number(row.bonus) },
+    { title: 'Final mark', width: 11, cell: (row) => number(row.finalMark) },
+  ]
+}
 
 /** Statuses that ask the teacher to do something, most urgent first. */
 const ATTENTION: readonly Status[] = [
@@ -386,6 +450,41 @@ const MEANING: ReadonlyArray<[string, string]> = [
   ['Submitted, Nothing yet', 'The softer wording used while the deadline has not passed.'],
 ]
 
+/** The kind of sheet, how a lab term is judged, and the rules table, for the Info sheet. */
+function markingLines(info: ExportInfo): Array<[string, XLSX.CellObject]> {
+  const lines: Array<[string, XLSX.CellObject]> = []
+  if (info.lab) {
+    const term = TERM_LABEL[info.lab.term]
+    const folder = info.lab.term === 'mid' ? 'Mid' : 'Final'
+    lines.push(
+      ['Sheet', text(`Lab / Performance base: ${term}`)],
+      [
+        'How a term is judged',
+        text(
+          `Only the repo's ${folder} folder counts (a top-level folder named like "${folder}", "${folder} term" or "${folder.toLowerCase()}-term"). Work pushed to other folders after the deadline does not make this term late or changed. Late by is counted to the push that first brought the folder, or that last changed it.`,
+        ),
+      ],
+    )
+  } else {
+    lines.push(['Sheet', text('Project base: one repo, one deadline')])
+  }
+  const rules = info.rules
+  if (!rules) return lines
+  lines.push(
+    ['Total mark', rules.total === null ? text('Not set, so no final marks') : number(rules.total)],
+    ['Marks off for late', number(rules.late)],
+    ['Marks off for changed after deadline', number(rules.changed)],
+    ['Mark for no submission', number(rules.noSubmission)],
+    [
+      'Final mark',
+      text(
+        'The total mark, minus the marks off for late or for changed after the deadline; the mark for no submission for an empty repo, a missing repo or a link that is not a repo. Then the bonus is added. Never below 0 and never above the total. Blank while a row is still being checked or when its check failed, so a failed check never costs marks.',
+      ),
+    ],
+  )
+  return lines
+}
+
 function infoSheet(info: ExportInfo): XLSX.WorkSheet {
   const lines: Array<[string, XLSX.CellObject]> = [
     ['Source sheet', text(info.sheetName)],
@@ -393,6 +492,7 @@ function infoSheet(info: ExportInfo): XLSX.WorkSheet {
     ['Checked at', excelDate(info.checkedAt)],
     ['Time zone of all dates', text(info.zone)],
     ['How lateness is judged', text('By the time GitHub received the push on the main branch, not by commit dates.')],
+    ...markingLines(info),
     [
       'First push',
       text(
@@ -432,7 +532,7 @@ function infoSheet(info: ExportInfo): XLSX.WorkSheet {
 /** Builds the workbook and the colours that go with it. Rows keep the order they are given in. */
 export function buildWorkbook(rows: readonly ExportRow[], info: ExportInfo): ResultsReport {
   const summary = summarySheet(rows, info)
-  const results = table(RESULT_COLUMNS, rows, statusPaint)
+  const results = table(resultColumns(info), rows, statusPaint)
   const attentionRows = needsAttention(rows)
   const attention = table(ATTENTION_COLUMNS, attentionRows, statusPaint)
   if (attentionRows.length === 0) attention.sheet.A2 = text('Nobody needs attention.')
@@ -469,15 +569,26 @@ export function downloadWorkbook(report: ResultsReport, fileName: string, save =
 }
 
 /** A small example of the expected sheet, for people who have none yet. */
-export function downloadSample(): void {
-  const sheet = XLSX.utils.aoa_to_sheet([
-    ['id', 'name', 'repolink'],
+/** The rows of the sample sheet of each kind: the columns the page reads, filled in. */
+export function sampleRows(kind: SheetKind): string[][] {
+  const people = [
     ['20-41234-1', 'Rahim Uddin', 'https://github.com/octocat/Hello-World'],
     ['20-41235-1', 'Karim Hasan', 'https://github.com/octocat/Spoon-Knife'],
     ['20-41236-1', 'Salma Akter', 'https://github.com/github/gitignore'],
-  ])
-  sheet['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 46 }]
+  ]
+  if (kind === 'project') return [['id', 'name', 'repolink'], ...people]
+  const earlier = [
+    ['8', '9'],
+    ['7', ''],
+    ['10', '8'],
+  ]
+  return [['id', 'name', 'repolink', 'Lab 1', 'Lab 2'], ...people.map((person, index) => [...person, ...earlier[index]])]
+}
+
+export function downloadSample(kind: SheetKind = 'project'): void {
+  const sheet = XLSX.utils.aoa_to_sheet(sampleRows(kind))
+  sheet['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 46 }, { wch: 8 }, { wch: 8 }]
   const book = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(book, sheet, 'Students')
-  XLSX.writeFile(book, 'sample-sheet.xlsx')
+  XLSX.writeFile(book, kind === 'project' ? 'sample-sheet.xlsx' : 'sample-lab-sheet.xlsx')
 }

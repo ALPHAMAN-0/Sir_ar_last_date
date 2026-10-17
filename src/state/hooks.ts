@@ -14,9 +14,11 @@ export function usePeople(): PersonRow[] {
   const repos = useApp((state) => state.repos)
   const activity = useApp((state) => state.activity)
   const deadline = useApp((state) => state.deadline)
+  const trees = useApp((state) => state.trees)
+  const term = useApp((state) => state.term)
   return useMemo(
-    () => (sheet ? judgeRows(sheet, repos, activity, deadline) : []),
-    [sheet, repos, activity, deadline],
+    () => (sheet ? judgeRows(sheet, repos, activity, deadline, trees, term) : []),
+    [sheet, repos, activity, deadline, trees, term],
   )
 }
 

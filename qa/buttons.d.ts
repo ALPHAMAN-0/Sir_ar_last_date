@@ -22,6 +22,8 @@ export type Requires = {
   route?: string
   /** The deadline must be set (any non-null value). */
   hasDeadline?: boolean
+  /** The saved sheet is of this kind. Default: a project sheet. */
+  sheetKind?: 'project' | 'lab'
   /** A row in the table must have at least one commit; used for "Show files" buttons. */
   hasCommits?: boolean
 }

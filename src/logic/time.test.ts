@@ -4,6 +4,7 @@ import {
   formatDateTimeShort,
   formatDayKey,
   formatDuration,
+  formatDurationLong,
   formatTime,
   localDateKey,
   parseDeadlineInput,
@@ -95,6 +96,32 @@ describe('formatDuration', () => {
     expect(formatDuration(200 * minute)).toBe('3h 20m')
     expect(formatDuration(24 * 60 * minute)).toBe('1d')
     expect(formatDuration((2 * 24 + 4) * 60 * minute + 30 * minute)).toBe('2d 4h')
+  })
+})
+
+describe('formatDurationLong', () => {
+  const minute = 60_000
+  const hour = 60 * minute
+  const day = 24 * hour
+
+  it('spells out days, hours and minutes, for the downloaded file', () => {
+    expect(formatDurationLong(2 * day + 4 * hour + 15 * minute)).toBe('2 days 4 hours 15 minutes')
+  })
+
+  it('uses the singular for one', () => {
+    expect(formatDurationLong(day + hour + minute)).toBe('1 day 1 hour 1 minute')
+  })
+
+  it('leaves out the parts that are zero', () => {
+    expect(formatDurationLong(3 * day)).toBe('3 days')
+    expect(formatDurationLong(2 * day + 5 * minute)).toBe('2 days 5 minutes')
+    expect(formatDurationLong(3 * hour + 20 * minute)).toBe('3 hours 20 minutes')
+    expect(formatDurationLong(45 * minute)).toBe('45 minutes')
+  })
+
+  it('rounds down to the minute, and never says zero for a real delay', () => {
+    expect(formatDurationLong(59_999)).toBe('under 1 minute')
+    expect(formatDurationLong(hour + 59_999)).toBe('1 hour')
   })
 })
 

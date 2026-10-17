@@ -1,84 +1,50 @@
 /* Final Destination
-   Look: clean and modern. A cool off-white page, white cards with soft
-   shadows, one violet accent, and status pills that always carry a word,
-   never colour alone. Dark mode follows the system setting. */
+   Look: calm and easy on the eyes. A warm paper page, soft white cards with
+   gentle warm shadows, one sage-green accent, and status pills that always
+   carry a word, never colour alone. Always light, whatever the system says. */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
-  --bg: #f4f5f8;
-  --surface: #ffffff;
-  --surface-2: #f7f8fa;
-  --surface-3: #eceef3;
-  --raised: #ffffff;
-  --text: #12151c;
-  --text-2: #586173;
-  --border: #e3e6ec;
-  --border-strong: #cdd2dc;
+  --bg: #f6f3ec;
+  --surface: #fffdf8;
+  --surface-2: #faf7f0;
+  --surface-3: #efeadf;
+  --raised: #fffdf8;
+  --text: #2e2b26;
+  --text-2: #6b655b;
+  --border: #e6dfd2;
+  --border-strong: #d4cbbb;
 
   /* The brand colour: text and lines use --accent, filled buttons --accent-fill. */
-  --accent: #4f3fe6;
-  --accent-fill: #4f3fe6;
-  --accent-fill-hover: #3f30d2;
-  --accent-soft: #efedff;
+  --accent: #46705a;
+  --accent-fill: #4f7a63;
+  --accent-fill-hover: #426b55;
+  --accent-soft: #e7efe9;
   --on-accent: #ffffff;
 
-  --good: #12784a;
-  --good-bg: #e2f4e9;
-  --warn: #8a5800;
-  --warn-bg: #fcf0d4;
-  --bad: #b42330;
-  --bad-bg: #fde8e8;
-  --info: #1a5fb4;
-  --info-bg: #e3edfa;
-  --muted: #626a78;
-  --muted-bg: #eef0f3;
+  --good: #2f6b47;
+  --good-bg: #e3f0e6;
+  --warn: #805310;
+  --warn-bg: #faefd7;
+  --bad: #9e3a2d;
+  --bad-bg: #f8e3de;
+  --info: #2f5f86;
+  --info-bg: #e2ecf3;
+  --muted: #635d54;
+  --muted-bg: #efebe3;
 
   --sans: 'Atkinson Hyperlegible Next Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-  --shadow-sm: 0 1px 2px rgb(16 20 32 / 0.05);
-  --shadow: 0 1px 2px rgb(16 20 32 / 0.04), 0 6px 18px -8px rgb(16 20 32 / 0.12);
-  --glow: rgb(79 63 230 / 0.3);
+  --shadow-sm: 0 1px 2px rgb(60 50 30 / 0.06);
+  --shadow: 0 1px 2px rgb(60 50 30 / 0.05), 0 6px 18px -8px rgb(60 50 30 / 0.14);
+  --glow: rgb(79 122 99 / 0.3);
 
   --gutter: clamp(1rem, 4vw, 2.5rem);
   --radius-sm: 6px;
   --radius: 10px;
   --radius-lg: 14px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0b0d12;
-    --surface: #13161d;
-    --surface-2: #181c24;
-    --surface-3: #1f242e;
-    --raised: #2a303c;
-    --text: #e8eaef;
-    --text-2: #a1a8b6;
-    --border: #252a35;
-    --border-strong: #353c4a;
-
-    --accent: #a69dff;
-    --accent-fill: #5b4bf0;
-    --accent-fill-hover: #6a5bff;
-    --accent-soft: #221f40;
-
-    --good: #63d296;
-    --good-bg: #12281c;
-    --warn: #f0c062;
-    --warn-bg: #2b2311;
-    --bad: #ff8d8d;
-    --bad-bg: #351619;
-    --info: #80b5ff;
-    --info-bg: #13253d;
-    --muted: #9aa1ae;
-    --muted-bg: #1d212a;
-
-    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
-    --shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 8px 22px -10px rgb(0 0 0 / 0.6);
-    --glow: rgb(91 75 240 / 0.45);
-  }
 }
 
 *,
@@ -270,7 +236,7 @@ p {
   background: var(--accent-fill);
   border-color: transparent;
   box-shadow:
-    0 1px 2px rgb(16 20 32 / 0.12),
+    0 1px 2px rgb(60 50 30 / 0.12),
     0 4px 12px -4px var(--glow),
     inset 0 1px 0 rgb(255 255 255 / 0.14);
 }
@@ -368,7 +334,10 @@ select:focus {
 .specimen figcaption,
 .sheetbar__label,
 .deadline__label,
-.grading__label,
+.marking__label,
+.terms__label,
+.ledger__plain,
+.upload-card__needs dt,
 .facts dt,
 .shares__table th[scope='col'],
 .similarity__paths-title {
@@ -388,37 +357,6 @@ select:focus {
   align-items: start;
 }
 
-.dropzone {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  display: grid;
-  gap: 1rem;
-  padding: clamp(1.75rem, 4.5vw, 3rem);
-  background: var(--surface);
-  border: 1.5px dashed var(--border-strong);
-  border-radius: 18px;
-  box-shadow: var(--shadow);
-  transition:
-    border-color 120ms ease,
-    background-color 120ms ease;
-}
-/* A soft violet glow in the corner. */
-.dropzone::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  right: -18%;
-  bottom: -55%;
-  width: 70%;
-  aspect-ratio: 1;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 16%, transparent), transparent);
-  pointer-events: none;
-}
-.dropzone--over {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
 .dropzone__step {
   justify-self: start;
   padding: 0.25rem 0.7rem;
@@ -438,11 +376,101 @@ select:focus {
   color: var(--text-2);
   font-size: 1.02rem;
 }
-.dropzone__actions {
+.upload__main {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+.upload__cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+.upload-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: grid;
+  align-content: start;
+  gap: 0.7rem;
+  padding: clamp(1.25rem, 3vw, 1.75rem);
+  background: var(--surface);
+  border: 1.5px dashed var(--border-strong);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+/* A soft sage glow in the corner. */
+.upload-card::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  right: -30%;
+  bottom: -45%;
+  width: 85%;
+  aspect-ratio: 1;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 12%, transparent), transparent);
+  pointer-events: none;
+}
+.upload-card--over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.upload-card__title {
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.upload-card__lead {
+  font-weight: 650;
+  line-height: 1.4;
+}
+.upload-card__detail {
+  color: var(--text-2);
+  font-size: 0.93rem;
+}
+.upload-card__needs {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.15rem 0 0;
+}
+.upload-card__needs > div {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
-  margin-top: 0.5rem;
+  align-items: center;
+  gap: 0.3rem 0.5rem;
+}
+.upload-card__needs dt {
+  color: var(--text-2);
+}
+.upload-card__needs dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0;
+}
+.upload-card__needs code {
+  padding: 0.1rem 0.45rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 6px;
+}
+.upload-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+@media (max-width: 44rem) {
+  .upload__cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .upload__side {
@@ -488,6 +516,11 @@ select:focus {
   color: var(--accent);
   background: var(--accent-soft);
 }
+.specimen__note {
+  margin-top: 0.7rem;
+  color: var(--text-2);
+  font-size: 0.86rem;
+}
 
 .promises {
   margin: 0;
@@ -532,7 +565,8 @@ select:focus {
 .sheetbar,
 .deadline,
 .picker,
-.grading {
+.marking,
+.terms {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -582,9 +616,9 @@ select:focus {
   color: var(--bad);
 }
 
-/* The deadline and grading boxes carry a violet bar on the left. */
+/* The deadline and marking boxes carry a sage bar on the left. */
 .deadline,
-.grading {
+.marking {
   display: grid;
   gap: 0.65rem;
   box-shadow:
@@ -620,127 +654,119 @@ select:focus {
   color: var(--text);
 }
 
-/* Three fields side by side, each label above its box; the rest spans the row. */
-.grading {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.85rem 1rem;
+/* The rules table: four fields side by side, each label above its box. */
+.marking {
+  gap: 0.8rem;
 }
-.grading > :not(.grading__field) {
-  grid-column: 1 / -1;
+.marking__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.8rem;
 }
-.grading__field {
+.marking__title {
+  font-size: 1rem;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+.marking__scope {
+  color: var(--text-2);
+  font-size: 0.88rem;
+}
+.marking__fields {
   display: grid;
-  align-content: start;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem 1rem;
+}
+.marking__field {
+  display: grid;
+  align-content: end;
   gap: 0.35rem;
 }
-.grading__label {
+.marking__label {
   color: var(--accent);
+  line-height: 1.3;
 }
-.grading__input {
+.marking__input {
   width: 100%;
-  font-family: var(--mono);
-  font-size: 0.92rem;
   min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.95rem;
 }
-@media (max-width: 40rem) {
-  .grading {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-.grading__actions {
-  display: flex;
-  gap: 0.6rem;
-}
-.grading__state {
+.marking__formula {
   color: var(--text-2);
   font-size: 0.93rem;
 }
-.grading__state strong {
+.marking__formula strong {
   color: var(--text);
   font-family: var(--mono);
-  font-weight: 500;
-  margin-right: 0.2rem;
+  font-weight: 600;
+}
+@media (max-width: 52rem) {
+  .marking__fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
-/* Kind badge: a small pill saying which sheet type is loaded. */
-.kind-badge {
-  display: inline-flex;
+/* Mid or Final, on a lab sheet: a segmented control like the tabs. */
+.terms {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  padding: 0.18rem 0.65rem;
-  border-radius: 999px;
-  font-size: 0.7rem;
-  font-weight: 750;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-2);
-  background: var(--muted-bg);
+  gap: 0.5rem 0.9rem;
 }
-.kind-badge--project {
-  color: var(--info);
-  background: var(--info-bg);
+.terms__label {
+  color: var(--accent);
 }
-.kind-badge--performance {
-  color: var(--warn);
-  background: var(--warn-bg);
+.terms__track {
+  display: inline-flex;
+  gap: 0.2rem;
+  padding: 0.25rem;
+  background: var(--surface-3);
+  border-radius: 12px;
 }
-
-/* Performance register table. Same card and header look as the main register. */
-.people-wrap {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  overflow-x: auto;
-}
-.people {
-  width: 100%;
-  border-collapse: collapse;
+.terms__button {
+  appearance: none;
+  padding: 0.45rem 1.05rem;
+  font: inherit;
   font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--text-2);
+  background: none;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease;
 }
-.people th {
+.terms__button:hover {
+  color: var(--text);
+}
+.terms__button--on {
+  color: var(--accent);
+  background: var(--raised);
+  box-shadow:
+    0 1px 2px rgb(60 50 30 / 0.1),
+    0 0 0 1px color-mix(in srgb, var(--border) 60%, transparent);
+}
+.terms__hint {
+  color: var(--text-2);
+  font-size: 0.88rem;
+}
+
+/* Which upload the sheet came through, beside its name. */
+.sheetbar__kind {
+  padding: 0.18rem 0.65rem;
   font-size: 0.7rem;
   font-weight: 750;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  white-space: nowrap;
-  color: var(--text-2);
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
 }
-.people td {
-  border-bottom: 1px solid var(--border);
-}
-.people tbody tr:last-child td {
-  border-bottom: 0;
-}
-.people td.people__row {
-  width: 1%;
-  color: var(--text-2);
-  font-family: var(--mono);
-  font-size: 0.78rem;
-}
-.perf-table th,
-.perf-table td {
-  padding: 0.6rem 0.75rem;
-  text-align: left;
-  vertical-align: top;
-}
-/* Numbers line up on the right, headers too. */
-.perf-table .perf-table__mark,
-.perf-table .perf-table__total,
-.perf-table .perf-table__final {
-  text-align: right;
-}
-.perf-table__final {
-  font-weight: 700;
-}
-
-/* Row tones, matching the status colours. */
-.people__row--good { background: color-mix(in srgb, var(--good) 9%, transparent); }
-.people__row--warn { background: color-mix(in srgb, var(--warn) 11%, transparent); }
-.people__row--bad  { background: color-mix(in srgb, var(--bad) 10%, transparent); }
-.people__row--muted { background: color-mix(in srgb, var(--muted) 9%, transparent); }
-.people__row--info { background: color-mix(in srgb, var(--info) 9%, transparent); }
 
 .picker {
   display: grid;
@@ -1077,6 +1103,62 @@ th.is-number .sort {
 }
 .entry td.mono {
   white-space: nowrap;
+}
+/* Headers that are not sorted on look like the sort buttons, without the arrow. */
+.ledger__table th.ledger__plain {
+  padding: 0.7rem 0.6rem;
+  color: var(--text-2);
+}
+.entry__tasks {
+  min-width: 8rem;
+  max-width: 16rem;
+  font-size: 0.85rem;
+}
+.entry__extra {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.entry__bonus {
+  width: 1%;
+}
+.bonus {
+  width: 4.5rem;
+  padding: 0.3rem 0.45rem;
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  text-align: right;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.bonus:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+.bonus[aria-invalid='true'],
+.marking__input[aria-invalid='true'] {
+  border-color: var(--bad);
+  background: var(--bad-bg);
+}
+.entry__mark {
+  min-width: 6rem;
+  max-width: 9.5rem;
+}
+.mark__final {
+  display: block;
+  font-family: var(--mono);
+  font-size: 1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.mark__rule {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--text-2);
+  font-size: 0.76rem;
 }
 
 /* ---------- person ---------- */
@@ -1564,6 +1646,27 @@ th.is-number .sort {
   .entry__row {
     display: none !important;
   }
+  .ledger__table thead .ledger__plain {
+    display: none;
+  }
+  .entry td.entry__bonus,
+  .entry td.entry__mark {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.5rem;
+    width: auto;
+    max-width: none;
+  }
+  .entry td.entry__bonus::before,
+  .entry td.entry__mark::before {
+    white-space: nowrap;
+  }
+  .mark__final,
+  .mark__rule {
+    display: inline;
+    margin: 0;
+  }
   .entry__name,
   .entry__status,
   .entry__repo {
@@ -1635,7 +1738,7 @@ th.is-number .sort {
   color: var(--accent);
   background: var(--raised);
   box-shadow:
-    0 1px 2px rgb(16 20 32 / 0.1),
+    0 1px 2px rgb(60 50 30 / 0.1),
     0 0 0 1px color-mix(in srgb, var(--border) 60%, transparent);
 }
 

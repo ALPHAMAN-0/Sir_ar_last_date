@@ -1,216 +1,154 @@
-# Grading — the auto-deduction rules
+# Marking — the rules table and the bonus
 
-This page is the spec for the **performance base** mark deduction. The
-short overview is in the project
-[README](../README.md); the long feature reference is in
-[SHEETS.md](SHEETS.md).
+This page is the spec for marking, on both kinds of sheet. The short overview
+is in the project [README](../README.md); the long feature reference is in
+[SHEETS.md](SHEETS.md). The code is
+[`src/logic/marking.ts`](../src/logic/marking.ts) (the rules) and
+[`src/logic/termFolder.ts`](../src/logic/termFolder.ts) (how a lab sheet's
+term is judged).
 
-The rules are local: the totals live only in this browser, in
-localStorage. They are never sent to a server. Reloading the page
-keeps them. Switching to a project base sheet keeps them too — the
-rules are tied to the teacher, not to the file.
-
----
-
-## The three inputs
-
-Above the performance table there is a small box with three fields and
-an **Apply** button:
-
-| Field | Type | Default | What it does |
-| --- | --- | --- | --- |
-| **Total mark** | number, or empty | empty | The ceiling the final mark is clamped to. Leave empty to clamp only at 0. |
-| **Marks off for late** | number, ≥ 0 | `0` | Subtracted from each late row. |
-| **Marks off for changed after deadline** | number, ≥ 0 | `0` | Subtracted from each row that pushed both before and after the deadline. |
-
-Pressing **Apply** saves the rules and the table recomputes
-immediately. A small state line under the box says the current rules
-in plain English, e.g.:
-
-> Total: 100 · Late: −20 · Changed after: −10
-
-The three numbers are independent. A teacher who only cares about one
-of them can leave the others at `0`.
-
-### What the box rejects
-
-The box keeps the previous value and shows a one-line error when:
-
-- The value is empty in a way the app cannot read (a stray space, a
-  letter, a `–` instead of `-`).
-- The value is negative.
-- The value is not a finite number (`Infinity`, `NaN`).
-
-The error sits under the offending field; the rest of the box keeps
-its value. The Apply button is the only way to commit a change; the
-teacher can also press **Enter** while focus is in any of the three
-inputs.
+Everything here lives in this browser only (localStorage, next to the sheet).
+No rule, bonus or mark is ever sent to a server.
 
 ---
 
-## The four deduction cases
+## The rules table
 
-The deduction is a pure function in
-[`src/logic/grading.ts`](../src/logic/grading.ts). It is total: it
-covers every status the register can return, and it never throws.
+Above the register sits **Marking rules**: four boxes, applied to every
+student by the status of their row. There is no Apply button: the marks are
+worked out as you type, because working them out asks GitHub for nothing.
 
-The signature, in plain English:
-
-```
-applyDeductions(mark, status, rules) → { final, lines }
-```
-
-- `mark` is the original mark, a number or `null`.
-- `status` is the row's status (see [SHEETS.md](SHEETS.md#statuses-on-a-performance-sheet)).
-- `rules` is `{ totalMark, offForLate, offForChanged }`.
-
-The function returns:
-
-- `final` — the new mark, or `null` when the input was `null`.
-- `lines` — a list of human-readable explanations, joined into one
-  cell in the workbook.
-
-### The four cases
-
-| Status | `final` | `lines` |
+| Box | Blank means | What it does |
 | --- | --- | --- |
-| `on_time` / `has_work` / `not_applicable` | `mark` (unchanged) | `[]` |
-| `late` | `mark − offForLate`, clamped to `[0, totalMark]` | `['Late: −N']` |
-| `changed_after` | `mark − offForChanged`, clamped to `[0, totalMark]` | `['Changed after deadline: −N']` |
-| `no_submission` / `not_found` / `invalid_link` / `check_failed` | `0` (clamped) | `['No work: 0']` |
+| **Total mark** | not set yet | Full marks. Until it is typed, no final mark is shown or written. |
+| **Marks off for late** | 0 | Taken off a **Late** row. One flat amount, however late. |
+| **Marks off for changed after deadline** | 0 | Taken off a **Changed after deadline** row. |
+| **Mark for no submission** | 0 | The mark of a row with nothing to mark (see below). |
 
-`not_applicable` is the status of a performance sheet that has no
-`repolink` column: there is no repo to check, so there is no
-deduction. The original mark is exported as the final mark.
+A value the box cannot use (a letter, a negative number, a total of 0, a
+number over 100,000) is named in a red line under the box, the box is marked,
+and the marks keep the last rules that worked. Half marks (`0.5`) are fine.
 
-### Clamping
+A project sheet has one rules table. A lab sheet has one **per term**: Mid
+and Final each keep their own deadline and rules (see below).
 
-`final` is clamped to `[0, totalMark ?? Infinity]`. A negative mark
-becomes `0`; a mark above the total is reduced to the total. With
-`totalMark` empty (the default), the upper bound is **open** — there
-is no upper clamp.
+## The bonus
 
-The clamp applies per row, after the deduction. It does not apply to
-the **lines**: the line `Late: −20` always reads `−20`, even if the
-resulting mark was already at `0`.
+Each row of the register has a **Bonus** box: the marks you give while you
+ask the student questions. It is in force as you type it.
 
-### `null` and non-numeric
+- **Enter** or **↓** goes to the next student's box, **↑** to the one above,
+  so a whole class can be marked from the keyboard.
+- A minus sign takes marks off (`-1` for a wrong answer).
+- A blank box is no bonus. Text that is not a number is marked red and not
+  used; the last good bonus stays.
+- A bonus belongs to the student **ID** (or to the sheet row when the row has
+  no ID), so replacing the sheet with a re-sorted or updated copy keeps each
+  bonus with its student. On a lab sheet each term has its own bonuses.
 
-- A `null` mark (an empty cell in the sheet) stays `null`. The lines
-  are `[]`. The workbook exports an empty cell.
-- A non-numeric mark in the sheet is also `null`; the page reads the
-  cell with `Number()` and discards anything that does not parse.
-- `Infinity` and `NaN` are rejected by the grading box itself, so
-  they never reach the function.
+## The final mark
 
-### Why the lines are an array, not a string
+| Status | Starts at |
+| --- | --- |
+| On time, Has work (no deadline set) | the total |
+| Late | total − marks off for late |
+| Changed after deadline | total − marks off for changed after deadline |
+| No submission, Not found, Invalid link | the mark for no submission |
+| Checking, Check failed | **no mark** (blank) |
 
-Two deductions in the future — a row that is both late **and** changed
-after the deadline — would yield `['Late: −20', 'Changed after
-deadline: −10']`. The workbook joins them with `; `, so the cell
-reads `Late: −20; Changed after deadline: −10`. The array keeps the
-parts sortable in Excel without parsing the joined string.
+Then the bonus is added, and the result is kept between **0** and the
+**total**: never below 0, never above the total, whatever the bonus.
 
----
+A row still being checked, or one GitHub could not answer, gets no mark at
+all: a failure of the check must never cost a student marks. Press Refresh,
+then download again.
 
-## Three worked examples
+Under each final mark the page says what the rules did ("Late −2",
+"No submission: 0"). The rule is shown even when the clamp hides it (a late
+row with a total of 2 and 5 off for late reads 0, "Late −5").
 
-The teacher has typed:
+### Worked example
 
-> Total: **100** · Late: **−20** · Changed after: **−10**
+Total **10** · Late **−2** · Changed after **−1** · No submission **0**
 
-### Example 1 — a late row
-
-A student pushed their repo one hour after the deadline. The sheet
-had a midterm mark of **80**. The function sees `status === 'late'`
-and `mark === 80`.
-
-```
-final = clamp(80 − 20, 0, 100) = 60
-lines = ['Late: −20']
-```
-
-The Results sheet row reads:
-
-| Row | ID | Midterm | Status | Final mark | Deduction |
-| --- | --- | --- | --- | --- | --- |
-| 2 | 22-46001-1 | 80 | Late | 60 | Late: −20 |
-
-### Example 2 — a changed-after row
-
-Another student pushed their first commit on Monday, then pushed a
-fix on Wednesday — after the deadline. The sheet had a midterm mark
-of **95**. The function sees `status === 'changed_after'`.
-
-```
-final = clamp(95 − 10, 0, 100) = 85
-lines = ['Changed after deadline: −10']
-```
-
-| Row | ID | Midterm | Status | Final mark | Deduction |
-| --- | --- | --- | --- | --- | --- |
-| 3 | 22-46002-1 | 95 | Changed after | 85 | Changed after deadline: −10 |
-
-### Example 3 — a row with no link column (a pure-marks sheet)
-
-The teacher uploaded a sheet with `id | name | midterm | final` and
-**no** `repolink` column. Every row's status is `not_applicable`.
-
-A student has `midterm: 70, final: 20`. The function sees
-`status === 'not_applicable'`.
-
-```
-final = 70 + 20 = 90   (the mark is the total of the cells; deductions do not apply)
-lines = []
-```
-
-The Results sheet exports the original cells in their own columns
-(Midterm, Final), then **Total** = 90, then Status = "Not graded",
-then Final mark = 90, then Deduction = *(empty)*.
-
-If the sheet had a link column, the same row would have had a real
-status, and the deductions would have applied. The link column is the
-switch between "pure marks" and "marks + repo check".
+| Student | Status | Bonus | Final mark |
+| --- | --- | --- | --- |
+| Rahim | On time | 2 | 10 (12, kept at the total) |
+| Karim | Late | 1 | 9 (10 − 2 + 1) |
+| Nila | Changed after deadline | | 9 (10 − 1) |
+| Tanvir | No submission | | 0 |
+| Arif | Check failed | 1 | blank |
 
 ---
 
-## What the page does on Reload
+## A lab sheet: Mid and Final
 
-On reload, the page reads the saved rules from localStorage and
-re-uses them. A teacher who set `Total: 100, Late: −20, Changed: −10`
-once sees the same rules the next time they open the page, regardless
-of the sheet. Switching between sheets keeps the rules too. Switching
-to a project base sheet keeps the rules; they just do not show until
-a performance sheet is uploaded.
+A lab sheet's repos hold one folder per term, at the top of the repo:
 
-The rules are not exported to the workbook as a single line — they go
-on the **Info** sheet in three labelled rows (`Total mark`, `Off for
-late`, `Off for changed`). A future teacher opening the same workbook
-sees which rules the file was generated under, even if the page has
-since been re-configured.
+```
+repo/
+  Mid/      Lab 1/  Lab 2/  Lab 3/
+  Final/    Lab 4/  Lab 5/
+```
+
+The register has a **Mid term / Final term** switch. Each term has its own
+deadline, rules table and bonuses, and every row is judged by **that term's
+folder only**: pushing Final work after the Mid deadline does not make Mid
+late or changed.
+
+**Which folder is the term's.** A top-level folder whose name starts with the
+term: `Mid`, `mid`, `Mid Term`, `mid-term`, `Midterm`, `mid_labs`, `Midsem`
+for Mid; `Final`, `Final Term`, `finalterm`, `Finals`, `final_labs` for
+Final. Not `middle`, not `finalize`, not a file. When two folders fit, the
+plainest name (`Mid`, `Midterm`) wins, then A to Z.
+
+**How a term is judged.** The whole repo is judged first, against the term's
+deadline, exactly as on a project sheet. Then git's fingerprint of the term
+folder (its tree hash, which changes whenever anything inside it changes) is
+compared:
+
+| Folder at the deadline | Folder now | Status |
+| --- | --- | --- |
+| there | the same | **On time**, with the note "Pushed after the deadline, but not to this term's folder" when other folders changed |
+| there | changed | **Changed after deadline**, late by the push that left the folder as it is now |
+| not there | there | **Late**, late by the push that first brought the folder |
+| not there | not there | **No submission**, "No folder for this term in the repo" |
+| there | gone | **Changed after deadline**, flagged for a look: "The term's folder was removed after the deadline" |
+
+The pushes in between are found by halving: about log₂ of the pushes after
+the deadline are looked at, two or three folder listings for a typical repo.
+Each listing is one folder level, asked for by commit hash, so the Worker
+caches it for good. This assumes a folder that arrived stays, and a folder
+that reached its final state stays in it; a folder that changed and changed
+back is dated by its last arrival in that state.
+
+**Lab tasks.** The register and the file list the term folder's sub-folders
+(`Lab 1, Lab 2, Lab 3`), or its files when it has no sub-folders. Hidden
+names (`.gitkeep`) are left out.
+
+**The sheet's other columns** (earlier marks, a section) are carried along
+as they are: shown after the lab tasks, and written into the file, numbers as
+numbers. At most 12 are carried.
 
 ---
 
-## What the function does **not** do
+## In the downloaded file
 
-- It does not invent a total mark from the sheet's columns. The
-  `Total` column in the report is the **sum of the cells the sheet
-  shipped with**; the `Total mark` rule is the upper clamp on the
-  `Final mark`. The two are not the same number, and that is on
-  purpose: a teacher who wants the sum to be the cap types the cap
-  in once.
-- It does not add deductions. `Late: −20` and `Changed after: −10`
-  are independent rules; a row that is both would lose `−30` in
-  future iterations, not `−20`. The current implementation handles
-  the four single-status cases only.
-- It does not look at the original mark when deciding the deduction.
-  A late row with `mark === 0` still has `Late: −20` in the lines;
-  the row's `final` is `0` because of the clamp, but the teacher
-  sees that the rule applied.
-- It does not persist the per-row deduction. The `lines` are
-  recomputed from the row's status and the rules on every render.
+The marks go at the **end** of the Results sheet, so no earlier column moves:
 
-For the in-code reference, see
-[`src/logic/grading.ts`](../src/logic/grading.ts) and its test file
-[`src/logic/grading.test.ts`](../src/logic/grading.test.ts). Every
-status, every clamp boundary, and the `null` path are unit-tested.
+| Column | Project | Lab |
+| --- | --- | --- |
+| Term folder | | the folder's name, or "No Mid term folder" |
+| Lab tasks | | `3: Lab 1, Lab 2, Lab 3` |
+| *(the sheet's other columns)* | | as they are |
+| **Deduction** | what the rules did, e.g. `Late −2` | same |
+| **Bonus** | a number | same |
+| **Final mark** | a number, blank when none can be given | same |
+
+**Late by** is spelled out in the file: `2 days 4 hours 15 minutes`.
+
+The **Info** sheet records the kind of sheet (and the term), how a term is
+judged, and the rules table the file was made with: Total mark, Marks off
+for late, Marks off for changed after deadline, Mark for no submission, and
+how the final mark is worked out. A file opened months later still says
+which rules made its marks.

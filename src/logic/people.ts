@@ -3,12 +3,14 @@
 
 import type { RepoOk } from '../../shared/api.ts'
 import { LINK_PROBLEM_TEXT } from '../sheet/parseRepoLink.ts'
+import type { SheetRow } from '../sheet/columns.ts'
 import type { ExportRow } from '../sheet/exportXlsx.ts'
 import type { PersonRow, Sort } from '../state/store.ts'
 import type { CommitShares } from './commitShares.ts'
 import { firstPush, type FirstPush } from './firstPush.ts'
+import { markFor, NO_RULES, type Rules } from './marking.ts'
 import { apiRepoName } from './repoName.ts'
-import { formatDuration } from './time.ts'
+import { formatDuration, formatDurationLong } from './time.ts'
 import { NOTE_TEXT, type Status, type Verdict } from './verdict.ts'
 
 export type Tone = 'good' | 'warn' | 'bad' | 'muted' | 'info' | 'busy'
@@ -161,6 +163,10 @@ export function repoLinkFor(person: PersonRow): string {
   return person.row.link.ok ? repoUrl(person.row.link.key) : ''
 }
 
+/** How the download marks each row: the rules table in force and each student's bonus. */
+export type Marking = { rules: Rules; bonusOf: (row: SheetRow) => number | null }
+const NO_MARKING: Marking = { rules: NO_RULES, bonusOf: () => null }
+
 /**
  * @param firstPushes by repo, read for the download. A repo that is missing
  *   gets what the register itself knows, which is the first push of a late row.
@@ -172,6 +178,7 @@ export function toExportRows(
   deadlinePassed: boolean,
   firstPushes: ReadonlyMap<string, FirstPush> = new Map(),
   commitShares: ReadonlyMap<string, CommitShares> = new Map(),
+  marking: Marking = NO_MARKING,
 ): ExportRow[] {
   return people.map((person) => {
     const meta = okMeta(person)
@@ -190,7 +197,8 @@ export function toExportRows(
       status: statusLabel(verdict.status, deadlinePassed),
       statusKey: verdict.status,
       needsReview: verdict.needsReview,
-      lateBy: latenessText(verdict),
+      // Spelled out in the file ("2 days 4 hours 15 minutes"), where there is room and no legend.
+      lateBy: verdict.lateByMs === null ? '' : formatDurationLong(verdict.lateByMs),
       lateMinutes: verdict.lateByMs === null ? null : Math.floor(verdict.lateByMs / 60_000),
       repoCreatedAt: meta?.createdAt ?? null,
       firstPush: (row.link.ok ? firstPushes.get(row.link.key) : undefined) ?? firstPush(person, undefined),
@@ -201,6 +209,22 @@ export function toExportRows(
       branch: meta?.defaultBranch ?? '',
       commitShares: shares,
       branches: hasWork ? (meta.branches ?? null) : null,
+      ...markColumns(person, marking),
     }
   })
+}
+
+function markColumns(person: PersonRow, { rules, bonusOf }: Marking): Pick<
+  ExportRow,
+  'markRule' | 'bonus' | 'finalMark' | 'labFolder' | 'labTasks' | 'extra'
+> {
+  const bonus = bonusOf(person.row)
+  const mark = markFor(person.verdict.status, rules, bonus ?? 0)
+  const columns: ReturnType<typeof markColumns> = { markRule: mark.rule, bonus, finalMark: mark.final }
+  if (person.lab) {
+    columns.labFolder = person.lab.folder
+    columns.labTasks = person.lab.tasks ?? null
+  }
+  if (person.row.extra) columns.extra = person.row.extra
+  return columns
 }

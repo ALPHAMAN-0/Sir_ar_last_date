@@ -99,10 +99,6 @@ async function freshStore(): Promise<Store> {
   return import('./store.ts')
 }
 
-function resetStorage(): void {
-  storage.clear()
-}
-
 /** Lets every queued request and its follow-ups finish. */
 async function settle(): Promise<void> {
   for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0))
@@ -238,7 +234,7 @@ describe('reading an uploaded file', () => {
     const csv = ['a,b,c', 'X1,Rahim,github.com/a/one'].join('\n')
     const store = await freshStore()
     await store.loadFile(new File([csv], 'class.csv'))
-    store.remapColumns({ kind: 'project', id: 1, name: 0, link: 2, headerRow: 0, marks: [] })
+    store.remapColumns({ kind: 'project', id: 1, name: 0, link: 2, headerRow: 0, extra: [] })
     expect(store.getState().sheet?.rows[0]).toMatchObject({ id: 'Rahim', name: 'X1' })
     expect(saved().rows[0]).toEqual([2, 'Rahim', 'X1', 'github.com/a/one'])
   })
@@ -650,71 +646,5 @@ describe('sorting and clearing', () => {
     expect(state.deadlineInput).toBe('')
     expect(state.search).toBe('')
     expect(storage.getItem(STORAGE_KEY)).toBeNull()
-  })
-})
-
-describe('grading controls', () => {
-  beforeEach(resetStorage)
-  afterEach(resetStorage)
-
-  it('starts with the default grading when no sheet has been loaded', async () => {
-    const store = await freshStore()
-    expect(store.getState().grading).toEqual({ totalMark: null, offForLate: 0, offForChanged: 0 })
-    expect(store.getState().gradingInput).toEqual({ total: '', offLate: '', offChanged: '' })
-  })
-
-  it('applies typed grading values and persists them with a sheet', async () => {
-    saveSheet(['github.com/a/one'])
-    const store = await freshStore()
-    store.start()  // bring the saved sheet back into state
-    store.setGradingInput('total', '100')
-    store.setGradingInput('offLate', '20')
-    store.setGradingInput('offChanged', '10')
-    expect(store.applyGrading()).toBe(true)
-    expect(store.getState().grading).toEqual({ totalMark: 100, offForLate: 20, offForChanged: 10 })
-    const persisted = saved() as { grading?: { totalMark: number; offForLate: number; offForChanged: number } }
-    expect(persisted.grading).toEqual({ totalMark: 100, offForLate: 20, offForChanged: 10 })
-  })
-
-  it('treats an empty total as "no upper bound"', async () => {
-    saveSheet(['github.com/a/one'])
-    const store = await freshStore()
-    store.start()
-    store.setGradingInput('total', '')
-    store.setGradingInput('offLate', '5')
-    expect(store.applyGrading()).toBe(true)
-    expect(store.getState().grading).toEqual({ totalMark: null, offForLate: 5, offForChanged: 0 })
-  })
-
-  it('rejects a negative or non-numeric total', async () => {
-    saveSheet(['github.com/a/one'])
-    const store = await freshStore()
-    store.start()
-    store.setGradingInput('total', '-5')
-    expect(store.applyGrading()).toBe(false)
-    store.setGradingInput('total', 'absent')
-    expect(store.applyGrading()).toBe(false)
-  })
-
-  it('rejects negative deductions', async () => {
-    saveSheet(['github.com/a/one'])
-    const store = await freshStore()
-    store.start()
-    store.setGradingInput('offLate', '-1')
-    expect(store.applyGrading()).toBe(false)
-  })
-
-  it('restores the saved grading on reload', async () => {
-    saveSheet(['github.com/a/one'])
-    const first = await freshStore()
-    first.start()  // bring the saved sheet back into state
-    first.setGradingInput('total', '50')
-    first.setGradingInput('offLate', '15')
-    first.setGradingInput('offChanged', '5')
-    expect(first.applyGrading()).toBe(true)
-    // New "browser" — fresh module, same storage.
-    const second = await freshStore()
-    second.start()
-    expect(second.getState().grading).toEqual({ totalMark: 50, offForLate: 15, offForChanged: 5 })
   })
 })

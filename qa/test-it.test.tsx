@@ -68,7 +68,10 @@ afterEach(() => {
  *  render starts from a known store. */
 async function seedFor(requires: Requires = {}): Promise<void> {
   if (requires.hasSheet) {
-    saveSheet(SHEET, requires.hasDeadline ? { deadlineInput: '2026-12-31T23:59' } : {})
+    saveSheet(SHEET, {
+      ...(requires.hasDeadline ? { deadlineInput: '2026-12-31T23:59' } : {}),
+      kind: requires.sheetKind ?? 'project',
+    })
   }
   history.replaceState(null, '', `/${requires.route ?? ''}`)
   vi.resetModules()

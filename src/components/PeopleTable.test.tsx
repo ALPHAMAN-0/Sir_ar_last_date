@@ -25,6 +25,7 @@ function people(cells: RowCells[], repos: Record<string, RepoMeta>) {
       rawLink,
       link: parseRepoLink(rawLink),
     })),
+    extraHeaders: [],
   }
   return judgeRows(sheet, new Map(Object.entries(repos)), new Map(), null)
 }
@@ -127,8 +128,9 @@ describe('PeopleTable', () => {
       />,
     )
     const headers = screen.getAllByRole('columnheader')
+    // Bonus and Final mark, after Late by, are not sorted on.
     expect(headers.map((header) => header.getAttribute('aria-sort'))).toEqual([
-      'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'descending',
+      'none', 'none', 'none', 'none', 'none', 'none', null, null, 'none', 'none', 'none', 'descending',
     ])
   })
 
@@ -163,5 +165,33 @@ describe('PeopleTable', () => {
     repo.addEventListener('click', (event) => event.preventDefault())
     fireEvent.click(repo)
     expect(window.location.hash).toBe('')
+  })
+
+  it("shows a lab row's tasks: dots while they are read, the names, or an empty folder", () => {
+    const [first, second, third] = people(
+      [
+        ['1', 'Rahim Uddin', 'github.com/rahim/lab'],
+        ['2', 'Karim Hasan', 'github.com/karim/lab'],
+        ['3', 'Nusrat Jahan', 'github.com/nusrat/lab'],
+      ],
+      {},
+    )
+    render(
+      <PeopleTable
+        people={[
+          { ...first, lab: { folder: 'Mid' } },
+          { ...second, lab: { folder: 'Mid', tasks: [] } },
+          { ...third, row: { ...third.row, extra: ['9'] }, lab: { folder: 'Mid', tasks: ['Lab 1', 'Lab 2'] } },
+        ]}
+        sort={{ column: 'row', descending: false }}
+        deadlinePassed
+        kind="lab"
+        extraHeaders={['Quiz']}
+      />,
+    )
+    const tasks = screen.getAllByRole('row').slice(1).map((row) => row.querySelector('[data-label="Lab tasks"]')?.textContent)
+    expect(tasks).toEqual(['…', 'Empty folder', 'Lab 1, Lab 2'])
+    expect(screen.getByRole('columnheader', { name: 'Quiz' })).toBeTruthy()
+    expect(screen.getAllByRole('row')[3].querySelector('[data-label="Quiz"]')?.textContent).toBe('9')
   })
 })

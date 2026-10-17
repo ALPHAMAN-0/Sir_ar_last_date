@@ -2,13 +2,21 @@
 // guessing which column is which, and turning the grid into people rows.
 // Kept separate so the page can start without downloading the Excel library.
 
-import { detectSheetKind, markColumnIndices, type SheetKind } from './kind.ts'
 import { parseRepoLink, type LinkResult } from './parseRepoLink.ts'
+
+/**
+ * Which upload the teacher chose on the home page. A project sheet has one
+ * repo per person judged against one deadline; a lab sheet's repos hold a
+ * folder per term (Mid, Final), each judged against its own deadline.
+ */
+export type SheetKind = 'project' | 'lab'
 
 export const MAX_ROWS = 1000
 export const MAX_FILE_BYTES = 5 * 1024 * 1024
 export const MAX_COLUMNS = 40
 export const HEADER_SCAN_ROWS = 15
+/** At most this many of a lab sheet's other columns are carried into the register and the file. */
+export const MAX_EXTRA_COLUMNS = 12
 
 export type Cell = { text: string; link: string | null }
 
@@ -31,8 +39,8 @@ export type ColumnMapping = {
   name: number | null
   link: number | null
   headerRow: number | null
-  /** Indices of detected mark columns; empty for a project sheet. */
-  marks: number[]
+  /** A lab sheet's other columns (earlier marks, a section…), carried along as they are. Empty for a project sheet. */
+  extra: number[]
 }
 
 export type SheetRow = {
@@ -43,6 +51,8 @@ export type SheetRow = {
   name: string
   rawLink: string
   link: LinkResult
+  /** What the sheet holds in each carried column, as text. Only on a lab sheet. */
+  extra?: string[]
 }
 
 export type SheetProblem = 'too_big' | 'unreadable' | 'empty'
@@ -92,7 +102,7 @@ const cellIsRepoLink = (cell: Cell) =>
  * "GitHub URL"); when there is no usable header, the link column is the one
  * that actually contains the most repo links.
  */
-export function detectMapping(grid: Cell[][]): ColumnMapping {
+export function detectMapping(grid: Cell[][], kind: SheetKind = 'project'): ColumnMapping {
   let headerRow: number | null = null
   let link: number | null = null
 
@@ -143,10 +153,29 @@ export function detectMapping(grid: Cell[][]): ColumnMapping {
   } else if (name === null && spare.length > 0) {
     name = spare[0]
   }
-  const draft: ColumnMapping = { kind: 'project', id, name, link, headerRow, marks: [] }
-  const kind = detectSheetKind(grid, draft)
-  const marks = kind === 'performance' ? markColumnIndices(grid, draft) : []
-  return { kind, id, name, link, headerRow, marks }
+  return withExtra(grid, { kind, id, name, link, headerRow, extra: [] })
+}
+
+/**
+ * The columns a lab sheet carries along: every column that is not the ID, the
+ * name or the link and that has a header or any data. None for a project sheet.
+ */
+export function withExtra(grid: Cell[][], mapping: ColumnMapping): ColumnMapping {
+  if (mapping.kind !== 'lab') return { ...mapping, extra: [] }
+  const taken = new Set([mapping.id, mapping.name, mapping.link])
+  const width = grid[0]?.length ?? 0
+  const extra: number[] = []
+  for (let c = 0; c < width && extra.length < MAX_EXTRA_COLUMNS; c++) {
+    if (taken.has(c)) continue
+    if (grid.some((row) => row[c]?.text)) extra.push(c)
+  }
+  return { ...mapping, extra }
+}
+
+/** The header of each carried column, or its letter when the sheet has no header row. */
+export function extraHeaders(data: SheetData, mapping: ColumnMapping): string[] {
+  const header = mapping.headerRow !== null ? data.grid[mapping.headerRow] : undefined
+  return mapping.extra.map((c) => header?.[c]?.text.trim() || `Column ${columnLetter(data.firstColumnIndex + c)}`)
 }
 
 /** Turns the grid into people rows, skipping the header and blank rows. */
@@ -174,7 +203,9 @@ export function buildRows(data: SheetData, mapping: ColumnMapping): SheetRow[] {
     if (!id && !name && !rawLink) continue
 
     const rowNumber = data.firstRowNumber + r
-    rows.push({ rowId: `r${rowNumber}`, rowNumber, id, name, rawLink, link })
+    const entry: SheetRow = { rowId: `r${rowNumber}`, rowNumber, id, name, rawLink, link }
+    if (mapping.kind === 'lab') entry.extra = mapping.extra.map((c) => pick(row, c).text)
+    rows.push(entry)
     if (rows.length >= MAX_ROWS) break
   }
   return rows
