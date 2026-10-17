@@ -1,4 +1,4 @@
-# Sir ar Last Date
+# Final Destination
 
 A submission register and gradebook that runs in your browser. Upload an Excel
 sheet, set a deadline, and the page tells you who pushed in time, who did not,

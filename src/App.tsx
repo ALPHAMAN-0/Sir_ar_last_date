@@ -1,5 +1,6 @@
 import { ContributionView } from './components/ContributionView.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
+import { Logo } from './components/Logo.tsx'
 import { PerformanceRegister } from './components/PerformanceRegister.tsx'
 import { PersonView } from './components/PersonView.tsx'
 import { Register } from './components/Register.tsx'
@@ -18,8 +19,8 @@ export default function App() {
     <div className="page">
       <header className="masthead">
         <a className="masthead__title" href="#/">
-          <span className="masthead__small">Sir ar</span>
-          <span className="masthead__big">Last Date</span>
+          <Logo className="masthead__logo" />
+          <span className="masthead__big">Final Destination</span>
         </a>
         <p className="masthead__tag">
           {kind === 'project'

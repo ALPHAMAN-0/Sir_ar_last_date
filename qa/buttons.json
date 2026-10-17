@@ -2,7 +2,7 @@
   "buttons": [
     {
       "id": "header.title",
-      "label": "Sir ar Last Date",
+      "label": "Final Destination",
       "selector": "a.masthead__title",
       "screen": "upload",
       "notes": "Top-left site title; always visible."

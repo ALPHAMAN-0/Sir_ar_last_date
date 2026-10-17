@@ -15,7 +15,7 @@ The run prints one line per registered button:
 
 ```
   Test it: 22 buttons — 20 pass, 2 skip, 0 fail
-    [pass] header.title — Sir ar Last Date
+    [pass] header.title — Final Destination
     [pass] header.tab.register — Register
     …
     [skip] register.columns — Columns (control not found: text=Columns)
