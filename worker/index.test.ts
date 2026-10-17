@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { activityUrl, commitUrl, commitsUrl, reposUrl, treeUrl } from '../shared/api.ts'
+import { activityUrl, blobsUrl, commitUrl, commitsUrl, reposUrl, treeUrl } from '../shared/api.ts'
 import { resetGitHubState } from './github.ts'
 import worker from './index.ts'
 
@@ -13,7 +13,14 @@ type Handler = (url: string, init: RequestInit) => Response
 const limiter = (success: boolean): RateLimit => ({ limit: async () => ({ success }) })
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
-  return { GITHUB_TOKEN: TOKEN, RL_GRAPHQL: limiter(true), RL_REST: limiter(true), RL_TREE: limiter(true), ...overrides }
+  return {
+    GITHUB_TOKEN: TOKEN,
+    RL_GRAPHQL: limiter(true),
+    RL_REST: limiter(true),
+    RL_TREE: limiter(true),
+    RL_BLOB: limiter(true),
+    ...overrides,
+  }
 }
 
 function quotaBody(remaining = 4000): string {
@@ -641,5 +648,115 @@ describe('/tree', () => {
     expect(res.status).toBe(429)
     expect(body.error.code).toBe('rate_limited')
     expect(res.headers.get('retry-after')).toBe('30')
+  })
+})
+
+describe('/blobs', () => {
+  const ONE = '1'.repeat(40)
+  const TWO = '2'.repeat(40)
+  const THREE = '3'.repeat(40)
+  const FOUR = '4'.repeat(40)
+  const url = (shas = [ONE]) => blobsUrl({ repo: 'octocat/hello-world', shas })
+  const answer = (repository: object | null, errors?: object[]) =>
+    new Response(JSON.stringify({ data: { repository }, ...(errors ? { errors } : {}) }))
+
+  it('asks GitHub once for all the contents, with the values as variables, and returns their text', async () => {
+    const calls = stubFetch(() =>
+      answer({
+        b0: { isBinary: false, isTruncated: false, text: 'let a = 1' },
+        b1: { isBinary: true, isTruncated: false, text: null },
+        b2: { isBinary: false, isTruncated: true, text: 'cut' },
+        b3: null,
+      }),
+    )
+    const { res, body } = await get(url([ONE, TWO, THREE, FOUR]))
+    expect(res.status).toBe(200)
+    expect(body).toEqual({
+      blobs: [
+        { sha: ONE, text: 'let a = 1' },
+        { sha: TWO, skipped: 'binary' },
+        { sha: THREE, skipped: 'too_large' },
+        { sha: FOUR, skipped: 'missing' },
+      ],
+      tooLarge: false,
+    })
+    const [call] = githubCalls(calls)
+    expect(call.url).toBe('https://api.github.com/graphql')
+    expect(new Headers(call.init.headers).get('authorization')).toBe(`Bearer ${TOKEN}`)
+    const sent = JSON.parse(String(call.init.body))
+    expect(sent.variables).toEqual({ owner: 'octocat', name: 'hello-world', b0: ONE, b1: TWO, b2: THREE, b3: FOUR })
+    // Values never travel inside the query text.
+    expect(sent.query).not.toContain(ONE)
+    expect(sent.query).not.toContain('octocat')
+  })
+
+  it('caches the text long, because a content hash never points at other text', async () => {
+    stubFetch(() => answer({ b0: { isBinary: false, isTruncated: false, text: 'x' } }))
+    const { res } = await get(url())
+    expect(res.headers.get('cache-control')).toBe('public, max-age=604800, immutable')
+  })
+
+  it('caches only briefly when a content was not found, in case GitHub was slow to find it', async () => {
+    stubFetch(() => answer({ b0: null }))
+    const { res, body } = await get(url())
+    expect(body.blobs).toEqual([{ sha: ONE, skipped: 'missing' }])
+    expect(res.headers.get('cache-control')).toBe('public, max-age=0, s-maxage=60')
+  })
+
+  it('does not parse an oversized answer and says so instead', async () => {
+    const text = 'x'.repeat(1_100_000)
+    stubFetch(() => answer({ b0: { isBinary: false, isTruncated: false, text } }))
+    const { res, body } = await get(url())
+    expect(res.status).toBe(200)
+    expect(body).toEqual({ blobs: [], tooLarge: true })
+  })
+
+  it('answers a short-lived 404 for a missing repo', async () => {
+    stubFetch(() => answer(null, [{ type: 'NOT_FOUND', path: ['repository'], message: 'nope' }]))
+    const { res, body } = await get(url())
+    expect(res.status).toBe(404)
+    expect(body.error.code).toBe('repo_not_found')
+    expect(res.headers.get('cache-control')).toBe('public, max-age=0, s-maxage=60')
+  })
+
+  it('answers 502, never a partial list, when GitHub reports another error', async () => {
+    stubFetch(() =>
+      answer({ b0: null }, [{ type: 'SERVICE_UNAVAILABLE', path: ['repository', 'b0'], message: 'timeout' }]),
+    )
+    const { res, body } = await get(url())
+    expect(res.status).toBe(502)
+    expect(body.error.code).toBe('github_error')
+    expect(res.headers.get('cache-control')).toBe('no-store')
+  })
+
+  it('treats a GraphQL RATE_LIMITED answer as quota exhaustion', async () => {
+    stubFetch(() => answer(null, [{ type: 'RATE_LIMITED', message: 'slow down' }]))
+    const { res, body } = await get(url())
+    expect(res.status).toBe(503)
+    expect(body.error.code).toBe('quota_reserved')
+  })
+
+  it('rejects malformed queries with 400 and never calls GitHub', async () => {
+    const calls = stubFetch(() => new Response('{}'))
+    for (const path of [
+      '/api/v1/blobs',
+      '/api/v1/blobs?repo=octocat%2Fhello-world',
+      `/api/v1/blobs?repo=octocat%2Fhello-world&b=${TWO}&b=${ONE}`,
+      `/api/v1/blobs?repo=Octocat%2FHello-World&b=${ONE}`,
+      `/api/v1/blobs?repo=octocat%2Fhello-world&b=not-a-sha`,
+    ]) {
+      const { res, body } = await get(path)
+      expect(res.status, path).toBe(400)
+      expect(body.error.code).toBe('bad_request')
+    }
+    expect(calls).toHaveLength(0)
+  })
+
+  it('counts against RL_BLOB, not RL_GRAPHQL', async () => {
+    stubFetch(() => answer({ b0: { isBinary: false, isTruncated: false, text: 'x' } }))
+    const limited = await get(url(), makeEnv({ RL_BLOB: limiter(false) }))
+    expect(limited.res.status).toBe(429)
+    const other = await get(url(), makeEnv({ RL_GRAPHQL: limiter(false) }))
+    expect(other.res.status).toBe(200)
   })
 })

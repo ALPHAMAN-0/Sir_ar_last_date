@@ -195,14 +195,17 @@ reasons:
 2. **Rate-limit headroom.** The Worker has a 5,000 / hour budget
    shared with one teacher; the page always uses it last.
 
-The four routes, all under `/api/v1/`:
+The routes, all `GET` under `/api/v1/`:
 
-| Route | Method | Purpose |
-| --- | --- | --- |
-| `/api/v1/repo` | GET | One repo's metadata, plus the head oid, the default branch, the branches list, `parent` and `templateRepository`. |
-| `/api/v1/log` | GET | The push log of one repo, oldest first, capped at 2 pages. |
-| `/api/v1/tree` | GET | A recursive file listing at a commit, with `{ path, sha, size }` per file, capped at 1 MB. |
-| `/api/v1/first` | GET | A push log + a file listing at every pushed commit, oldest first, until every shared file has been seen. |
+| Route | Purpose |
+| --- | --- |
+| `/repos` | Up to 20 repos' facts in one GraphQL call: head commit, main branch, branches, `parent` and `template`. |
+| `/activity` | A repo's push log (GitHub's record of when each push arrived). |
+| `/commits` | The commits behind a repo's head, 100 a page. |
+| `/commit` | The files one commit changed, and whether each changed beyond whitespace. |
+| `/tree` | A file listing at a commit, with `{ path, sha, size }` per file, capped at 1 MB. |
+| `/blobs` | The text of up to 40 files of one repo by content hash, in one GraphQL call, for the shared-code check. Capped at 1 MB. |
+| `/status` | The token's remaining hourly quota. |
 
 The token must be a **fine-grained** GitHub PAT with
 **Public repositories** access and **no permissions**. Create one at
@@ -262,6 +265,13 @@ manager is npm; the lockfile is `package-lock.json`.
   "Cannot tell" whenever the evidence does not prove a direction
   (see [../SIMILARITY.md](../SIMILARITY.md) for the design log). A
   wrong accusation is the failure to avoid.
+- **Shared code is a pointer, not proof.** It finds code two repos
+  share even where a copy was edited (spaces, line endings, case,
+  comments or some lines changed), but not code whose names were all
+  renamed. Code that more repos have than the starter limit is not
+  counted. Students who copied the same class example share code
+  too, and it never says who had the code first. It reads only code
+  and markup files up to 150 KB (notebooks: their cells).
 - **Term folders sit at the top of the repo.** A `Mid` folder inside
   another folder is not found, and the row reads "No submission" with
   "No folder for this term in the repo".

@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx'
 import type { TreeFile } from '../../shared/api.ts'
 import { formatDateTimeShort } from '../logic/time.ts'
 import { at, repo } from '../test/stories.ts'
+import { codeOf, printText } from './codeText.ts'
 import { analyse } from './compare.ts'
 import { judgePair, pairKey, sharedBlobs } from './first.ts'
 import type { FirstState } from './firstRun.ts'
@@ -20,6 +21,7 @@ import { noSkips } from './rules.ts'
 import type { Plan, RepoGroup } from './run.ts'
 import { summarise } from './summary.ts'
 import type { Loaded, TreeError } from './trees.ts'
+import { analyseCode, type CodeRepo } from './sharedCode.ts'
 import type { RepoFiles } from './types.ts'
 
 declare const process: { env: Record<string, string | undefined> }
@@ -104,6 +106,7 @@ describe('buildReportWorkbook', () => {
       'Same repo',
       'People',
       'Starter files',
+      'Shared code',
       'Info',
     ])
   })
@@ -298,7 +301,7 @@ describe('buildReportWorkbook', () => {
       groups: [group('a/x', [who(2, '1', 'A')]), group('b/y', [who(3, '2', 'B')])],
       trees: [tree('a/x', { 'a.js': 'one' }), tree('b/y', { 'b.js': 'two' })],
     })
-    expect(book.SheetNames).toHaveLength(7)
+    expect(book.SheetNames).toHaveLength(8)
     expect(rows('Pairs')).toHaveLength(1)
     expect(rows('Who was first')).toHaveLength(1)
     expect(rows('Matching files')).toHaveLength(1)
@@ -477,7 +480,91 @@ describe('downloadReport', () => {
     const [bytes, name] = save.mock.calls[0]
     expect(name).toBe('similarity-2026-10-05-2359.xlsx')
     expect(XLSX.read(bytes, { type: 'array' }).SheetNames).toEqual([
-      'Pairs', 'Who was first', 'Matching files', 'Same repo', 'People', 'Starter files', 'Info',
+      'Pairs', 'Who was first', 'Matching files', 'Same repo', 'People', 'Starter files', 'Shared code', 'Info',
     ])
+  })
+})
+
+describe('shared code', () => {
+  /** `count` lines of made-up code, all different. */
+  const program = (count: number, name = 'total') =>
+    Array.from({ length: count }, (_, i) => `let ${name}${i} = compute(${i}, "${name} item ${i}") + offset * ${i + 3};`).join('\n')
+  const ORIGINAL = program(40)
+  const EDITED = `// mine\n${ORIGINAL.split('\n').map((line, i) => (i % 10 === 9 ? `log("mine ${i}")` : line)).join('\n')}`
+  const codeRepo = (repo: string, files: Record<string, string>): CodeRepo => ({
+    repo,
+    files: Object.entries(files).map(([path, text]) => ({ path, sha: sha(text), prints: printText(codeOf(path, text) ?? '') })),
+  })
+  const repos = [
+    codeRepo('rahim/task-1', { 'lab/form.js': ORIGINAL }),
+    codeRepo('karim/task-1', { '=task/main.js': EDITED }),
+    codeRepo('salma/task-1', { 'solo.js': program(40, 'salma') }),
+  ]
+  const code = (analysis: ReturnType<typeof analyseCode> | null = analyseCode(repos, { commonLimit: 4 })) => ({
+    analysis,
+    repos: new Map(repos.map((entry) => [entry.repo, entry])),
+    groups: new Map(klass.groups.map((entry) => [entry.repo, entry])),
+    failed: 1,
+  })
+  const withCode = (value: ReturnType<typeof code>) => {
+    const bytes = writeReport({ ...input(klass), code: value })
+    const book = XLSX.read(bytes, { type: 'array', cellFormula: true, cellNF: true, cellStyles: true })
+    const rows = (name: string) => XLSX.utils.sheet_to_json<unknown[]>(book.Sheets[name], { header: 1, defval: '' })
+    return { book, rows }
+  }
+
+  it('writes one row per pair that shares code, with the lines on both sides', () => {
+    const { book, rows } = withCode(code())
+    const [header, first, ...rest] = rows('Shared code')
+    expect(header).toEqual([
+      'Pair', 'Result', 'Shared code', 'A ID', 'A name', 'A repo', 'B ID', 'B name', 'B repo',
+      'A lines shared', 'A lines compared', 'Share of A', 'B lines shared', 'B lines compared', 'Share of B',
+      'A files', 'B files', 'Identical files too', 'Files and lines',
+    ])
+    expect(rest).toEqual([])
+    expect(first.slice(0, 2)).toEqual([1, 'Almost all code shared'])
+    expect(first.slice(3, 9)).toEqual([
+      '20-41234-1; 20-41238-1',
+      'Rahim Uddin; Farhana Akter',
+      'https://github.com/rahim/task-1',
+      '20-41235-1',
+      'Karim Hasan',
+      'https://github.com/karim/task-1',
+    ])
+    expect(first[10]).toBe(40)
+    expect(first.slice(15, 18)).toEqual([1, 1, 'Yes: pair 2 on the Pairs sheet'])
+    expect(String(first[18])).toMatch(/^lab\/form\.js lines 1–\d+.* ↔ =task\/main\.js lines 2–\d+.*: \d+ of 40 lines$/)
+    // Shares are numbers that Excel shows as a percentage, and the result is coloured.
+    expect(book.Sheets['Shared code'].C2).toMatchObject({ t: 'n', z: '0%' })
+    expect(book.Sheets['Shared code'].F2.l?.Target).toBe('https://github.com/rahim/task-1')
+    const fill = (address: string) => (book.Sheets['Shared code'][address].s as { fgColor?: { rgb?: string } } | undefined)?.fgColor?.rgb
+    expect(fill('B2')).toBe('FBE6B3')
+    // A path that starts with "=" stays text.
+    for (const address of Object.keys(book.Sheets['Shared code'])) {
+      if (!address.startsWith('!')) expect(book.Sheets['Shared code'][address].f).toBeUndefined()
+    }
+  })
+
+  it('counts the pairs on the Info sheet and says what shared code is and is not', () => {
+    const info = new Map(withCode(code()).rows('Info').map((row) => [row[0] as string, row[1]]))
+    expect(info.get('Pairs that share code')).toBe(1)
+    expect(info.get('Pairs that share most of their code or more')).toBe(1)
+    expect(info.get('Repos whose code could not be read')).toBe(1)
+    expect(String(info.get('What "shared code" means'))).toMatch(/Spaces, line endings, letter case and comments/)
+    expect(String(info.get('What shared code cannot see'))).toMatch(/renamed/)
+  })
+
+  it('says so when the code was not compared to the end', () => {
+    const { rows } = withCode(code(null))
+    expect(rows('Shared code')).toHaveLength(1)
+    const info = new Map(rows('Info').map((row) => [row[0] as string, row[1]]))
+    expect(info.get('Pairs that share code')).toBe('Not finished when this report was made')
+  })
+
+  it('leaves the sheet empty and says why when no code was given', () => {
+    const { rows } = roundTrip(klass)
+    expect(rows('Shared code')).toHaveLength(1)
+    const info = new Map(rows('Info').map((row) => [row[0] as string, row[1]]))
+    expect(info.get('Pairs that share code')).toBe('Not finished when this report was made')
   })
 })

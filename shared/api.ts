@@ -14,6 +14,8 @@ import {
 export const API_BASE = '/api/v1'
 export const MAX_REPOS_PER_CALL = 20
 export const MAX_FILE_PAGE = 30
+/** File texts in one `/blobs` call: one GraphQL quota point, whatever the count. */
+export const MAX_BLOBS_PER_CALL = 40
 
 /** A repo's branches: how many, and the first 100 names, A to Z. */
 export type RepoBranches = { total: number; names: string[] }
@@ -139,6 +141,24 @@ export type TreeResponse = {
   tooLarge: boolean
 }
 
+export type BlobsParams = {
+  repo: string
+  /** Content hashes of files in that repo, A to Z, each once. */
+  shas: string[]
+}
+/**
+ * The text of one file content, or why there is none: `binary` (a picture or
+ * the like), `too_large` (GitHub would not send all of it), `missing` (the repo
+ * does not hold that content, or GitHub could not find it just now).
+ */
+export type BlobText = { sha: string; text: string } | { sha: string; skipped: 'binary' | 'too_large' | 'missing' }
+export type BlobsResponse = {
+  /** In the order of the request. */
+  blobs: BlobText[]
+  /** The texts together were too big for one answer. Ask again for fewer at a time. */
+  tooLarge: boolean
+}
+
 const enc = encodeURIComponent
 
 function join(parts: Array<string | null>): string {
@@ -185,11 +205,20 @@ export function treeQuery(p: TreeParams): string {
   return join([`repo=${enc(p.repo)}`, `sha=${enc(p.sha)}`, p.flat ? 'flat=1' : null])
 }
 
+export function canonicalShas(shas: readonly string[]): string[] {
+  return [...new Set(shas)].sort()
+}
+
+export function blobsQuery(p: BlobsParams): string {
+  return join([`repo=${enc(p.repo)}`, ...canonicalShas(p.shas).map((sha) => `b=${enc(sha)}`)])
+}
+
 export const reposUrl = (keys: readonly string[]) => `${API_BASE}/repos?${reposQuery(keys)}`
 export const activityUrl = (p: ActivityParams) => `${API_BASE}/activity?${activityQuery(p)}`
 export const commitsUrl = (p: CommitsParams) => `${API_BASE}/commits?${commitsQuery(p)}`
 export const commitUrl = (p: CommitParams) => `${API_BASE}/commit?${commitQuery(p)}`
 export const treeUrl = (p: TreeParams) => `${API_BASE}/tree?${treeQuery(p)}`
+export const blobsUrl = (p: BlobsParams) => `${API_BASE}/blobs?${blobsQuery(p)}`
 export const statusUrl = () => `${API_BASE}/status`
 
 // Parsers used by the Worker. Each returns null unless every value is valid AND
@@ -278,4 +307,15 @@ export function parseTreeQuery(search: string): TreeParams | null {
   const parsed: TreeParams = { repo, sha }
   if (flat === '1') parsed.flat = true
   return `?${treeQuery(parsed)}` === search ? parsed : null
+}
+
+export function parseBlobsQuery(search: string): BlobsParams | null {
+  const params = new URLSearchParams(search)
+  if (!only(params, ['repo', 'b'])) return null
+  const repo = single(params, 'repo')
+  const shas = params.getAll('b')
+  if (!repo || !isRepoKey(repo)) return null
+  if (shas.length === 0 || shas.length > MAX_BLOBS_PER_CALL || !shas.every(isSha)) return null
+  const parsed: BlobsParams = { repo, shas }
+  return `?${blobsQuery(parsed)}` === search && canonicalShas(shas).length === shas.length ? parsed : null
 }

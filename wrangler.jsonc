@@ -20,7 +20,10 @@
     // File lists for the similarity tab: one per repo, so a class of 120 goes through
     // in one minute, plus the older file lists that "who had it first" reads (the page
     // caps those itself). Above the limit the page waits and carries on by itself.
-    { "name": "RL_TREE", "namespace_id": "7303", "simple": { "limit": 120, "period": 60 } }
+    { "name": "RL_TREE", "namespace_id": "7303", "simple": { "limit": 120, "period": 60 } },
+    // File texts for the shared-code check: 40 files a call, so most repos take one
+    // call and a class of 120 goes through in about a minute.
+    { "name": "RL_BLOB", "namespace_id": "7304", "simple": { "limit": 120, "period": 60 } }
   ],
   // Deploy fails if the token secret is missing.
   "secrets": { "required": ["GITHUB_TOKEN"] },

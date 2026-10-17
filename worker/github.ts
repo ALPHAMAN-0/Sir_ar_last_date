@@ -3,6 +3,7 @@
 
 import type { QuotaInfo } from '../shared/api.ts'
 import { ApiErr } from './http.ts'
+import { readTextCapped } from './readCapped.ts'
 
 const GITHUB_API = 'https://api.github.com'
 const USER_AGENT = 'sir-ar-last-date'
@@ -155,11 +156,26 @@ export async function rest(env: Env, path: string): Promise<Response> {
 
 export type GraphQLError = { type?: string; path?: Array<string | number>; message?: string }
 
+type GraphQLBody<T> = { data?: T | null; errors?: GraphQLError[] } | null
+
+function parseBody<T>(text: string): GraphQLBody<T> {
+  try {
+    return JSON.parse(text) as GraphQLBody<T>
+  } catch {
+    return null
+  }
+}
+
+/**
+ * POST a GraphQL query. With `maxBytes`, an answer that grows past it is not
+ * read to the end and comes back as `tooLarge`, so it never reaches JSON.parse.
+ */
 export async function graphql<T>(
   env: Env,
   query: string,
   variables: Record<string, unknown>,
-): Promise<{ data: T | null; errors: GraphQLError[] }> {
+  options: { maxBytes?: number } = {},
+): Promise<{ data: T | null; errors: GraphQLError[]; tooLarge?: boolean }> {
   await seed(env)
   guard('graphql')
   const res = await send(`${GITHUB_API}/graphql`, {
@@ -171,10 +187,14 @@ export async function graphql<T>(
   checkThrottle(res, 'graphql')
   if (res.status === 401) throw authError()
   if (!res.ok) throw new ApiErr(502, 'github_error', `GitHub answered with status ${res.status}.`)
-  const body = (await res.json().catch(() => null)) as {
-    data?: T | null
-    errors?: GraphQLError[]
-  } | null
+  let body: GraphQLBody<T>
+  if (options.maxBytes === undefined) {
+    body = (await res.json().catch(() => null)) as GraphQLBody<T>
+  } else {
+    const text = await readTextCapped(res, options.maxBytes)
+    if (text === null) return { data: null, errors: [], tooLarge: true }
+    body = parseBody<T>(text)
+  }
   if (!body) throw new ApiErr(502, 'github_error', 'GitHub sent an unreadable answer.')
   const errors = body.errors ?? []
   // GraphQL reports an exhausted quota inside a normal 200 answer.

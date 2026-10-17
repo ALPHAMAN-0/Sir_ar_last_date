@@ -5,6 +5,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { repoUrl } from '../logic/people.ts'
 import { zoneLabel } from '../logic/time.ts'
+import type { CodeRequest } from '../similarity/code.worker.ts'
+import { createCodeLoader, type CodeLoaded } from '../similarity/codeLoader.ts'
 import { analyse, defaultCommonLimit, pairDetail, sharedSets, type Shared } from '../similarity/compare.ts'
 import type { CompareRequest } from '../similarity/compare.worker.ts'
 import {
@@ -23,8 +25,8 @@ import {
   planComparison,
   repoFacts,
   type RepoFacts,
-  type RepoGroup,
 } from '../similarity/run.ts'
+import { analyseCode, type CodeAnalysis } from '../similarity/sharedCode.ts'
 import { summarise, type NotCompared, type PairRow } from '../similarity/summary.ts'
 import { createTreeLoader, type Loaded, type TreeInput } from '../similarity/trees.ts'
 import type { Analysis, RepoFiles } from '../similarity/types.ts'
@@ -32,12 +34,16 @@ import { useApp, usePeople } from '../state/hooks.ts'
 import { loadCommits } from '../state/person.ts'
 import { client } from '../state/store.ts'
 import { PauseNotice } from './PauseNotice.tsx'
+import { SharedCode, type CodeLists } from './SharedCode.tsx'
+import { Side } from './SimilaritySide.tsx'
 import { FirstCell, FirstEvidence } from './WhoFirst.tsx'
 
 // File lists are addressed by commit id, so one loader keeps them for the whole session.
 const loader = createTreeLoader(client.get)
 // Push logs and the files at an older commit never change either: one runner keeps them too.
 const firstRunner = createFirstRunner({ history: createHistoryLoader(client.get), commits: loadCommits })
+// A file's text is addressed by its content hash: one loader keeps the fingerprints for the session.
+const codeLoader = createCodeLoader(client.get)
 
 /** Rows drawn before "Show all". A class of 200 can produce thousands of weak pairs. */
 const VISIBLE_PAIRS = 100
@@ -119,6 +125,65 @@ function useAnalysis(trees: ReadonlyMap<string, RepoFiles> | null, commonLimit: 
   return result && result.trees === trees ? result.analysis : null
 }
 
+/** Reads the code of every repo whose file list loaded. Starts again on "Try again". */
+function useCodeLists(trees: ReadonlyMap<string, RepoFiles> | null) {
+  const [attempt, setAttempt] = useState(0)
+  const [result, setResult] = useState<{ trees: unknown; attempt: number; lists: CodeLists } | null>(null)
+
+  useEffect(() => {
+    if (!trees) return
+    let live = true
+    void codeLoader
+      .loadAll(trees, (done, total) => {
+        if (live) setResult({ trees, attempt, lists: { phase: 'loading', done, total } })
+      })
+      .then((loaded) => {
+        if (live) setResult({ trees, attempt, lists: { phase: 'ready', loaded } })
+      })
+    return () => {
+      live = false
+    }
+  }, [trees, attempt])
+
+  const lists: CodeLists | null = !trees
+    ? null
+    : result && result.trees === trees && result.attempt === attempt
+      ? result.lists
+      : { phase: 'loading', done: 0, total: trees.size }
+  return { lists, retry: () => setAttempt((count) => count + 1) }
+}
+
+/** Compares the code in a Web Worker, as `useAnalysis` does for the file lists. */
+function useCodeAnalysis(loaded: CodeLoaded | null, commonLimit: number): CodeAnalysis | null {
+  const [result, setResult] = useState<{ loaded: unknown; analysis: CodeAnalysis } | null>(null)
+
+  useEffect(() => {
+    if (!loaded) return
+    const repos = [...loaded.repos.values()].map((entry) => entry.code)
+    let live = true
+    const finish = (analysis: CodeAnalysis) => {
+      if (live) setResult({ loaded, analysis })
+    }
+    const here = () => queueMicrotask(() => finish(analyseCode(repos, { commonLimit })))
+    let worker: Worker | null = null
+    try {
+      worker = new Worker(new URL('../similarity/code.worker.ts', import.meta.url), { type: 'module' })
+      worker.addEventListener('message', (event: MessageEvent<CodeAnalysis>) => finish(event.data))
+      worker.addEventListener('error', here)
+      const request: CodeRequest = { repos, commonLimit }
+      worker.postMessage(request)
+    } catch {
+      here()
+    }
+    return () => {
+      live = false
+      worker?.terminate()
+    }
+  }, [loaded, commonLimit])
+
+  return result && result.loaded === loaded ? result.analysis : null
+}
+
 const NOT_CHECKED: { states: FirstStates; progress: FirstProgress } = {
   states: new Map(),
   progress: { done: 0, total: 0 },
@@ -193,6 +258,10 @@ export function SimilarityView() {
   const shared = useMemo(() => (analysis ? sharedSets(analysis) : null), [analysis])
   const facts = useMemo(() => repoFacts(people), [people])
   const first = useFirst(analysis, loaded?.trees ?? null, facts, shared)
+  const code = useCodeLists(loaded?.trees ?? null)
+  const codeLoaded = code.lists?.phase === 'ready' ? code.lists.loaded : null
+  const codeAnalysis = useCodeAnalysis(codeLoaded, limit)
+  const groupsByRepo = useMemo(() => new Map(plan.groups.map((group) => [group.repo, group])), [plan])
 
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
   const [showAll, setShowAll] = useState(false)
@@ -222,6 +291,12 @@ export function SimilarityView() {
         analysis,
         trees: loaded.trees,
         first: first.states,
+        code: {
+          analysis: codeAnalysis,
+          repos: new Map([...(codeLoaded?.repos ?? [])].map(([repo, entry]) => [repo, entry.code])),
+          groups: groupsByRepo,
+          failed: codeLoaded?.errors.size ?? 0,
+        },
         info: {
           fileName: sheet.fileName,
           sheetName: sheet.sheetName,
@@ -522,6 +597,17 @@ export function SimilarityView() {
           <p className="empty">No two different repos in this sheet hold a file with the same content.</p>
         )
       ) : null}
+
+      {summary && loaded && code.lists ? (
+        <SharedCode
+          lists={code.lists}
+          analysis={codeAnalysis}
+          groups={groupsByRepo}
+          trees={loaded.trees}
+          commonLimit={limit}
+          onRetry={code.retry}
+        />
+      ) : null}
     </section>
   )
 }
@@ -529,18 +615,6 @@ export function SimilarityView() {
 /** "3 of 5 · 60%": how many of one side's compared files are in the other, and that share. */
 function ofText(identical: number, own: number, share: number): string {
   return own === 0 ? '100%' : `${identical} of ${own} · ${percent(share)}`
-}
-
-function Side({ group, max }: { group: RepoGroup; max?: number }) {
-  return (
-    <>
-      <strong>{groupLabel(group, max)}</strong>
-      <a className="similarity__repo mono" href={repoUrl(group.repo)} target="_blank" rel="noopener noreferrer">
-        {group.nameWithOwner}
-      </a>
-      {group.isFork ? <span className="tag">Fork</span> : null}
-    </>
-  )
 }
 
 function PairLine({

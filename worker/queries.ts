@@ -36,3 +36,17 @@ export const COMMITS_DOCUMENT = `query Commits($owner: String!, $name: String!, 
     }
   }
 }`
+
+/**
+ * The text of up to 40 file contents of one repo: b0, b1, ... with variables
+ * $b0, $b1, ... An object lookup is no connection, so the call costs one point.
+ */
+export function blobsDocument(count: number): string {
+  const variables = ['$owner: String!', '$name: String!']
+  const fields: string[] = []
+  for (let i = 0; i < count; i++) {
+    variables.push(`$b${i}: GitObjectID!`)
+    fields.push(`    b${i}: object(oid: $b${i}) { ...BlobText }`)
+  }
+  return `query Blobs(${variables.join(', ')}) {\n  repository(owner: $owner, name: $name) {\n${fields.join('\n')}\n  }\n}\nfragment BlobText on Blob { isBinary isTruncated text }`
+}

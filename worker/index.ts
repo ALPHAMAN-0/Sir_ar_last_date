@@ -1,6 +1,7 @@
 import {
   API_BASE,
   parseActivityQuery,
+  parseBlobsQuery,
   parseCommitQuery,
   parseCommitsQuery,
   parseReposQuery,
@@ -8,6 +9,7 @@ import {
 } from '../shared/api.ts'
 import { ApiErr, badRequest, errorResponse } from './http.ts'
 import { handleActivity } from './routes/activity.ts'
+import { handleBlobs } from './routes/blobs.ts'
 import { handleCommit } from './routes/commit.ts'
 import { handleCommits } from './routes/commits.ts'
 import { handleRepos } from './routes/repos.ts'
@@ -72,6 +74,12 @@ async function route(request: Request, env: Env): Promise<Response> {
       if (!params) throw badRequest()
       await limit(env.RL_TREE, request)
       return handleTree(env, params)
+    }
+    case `${API_BASE}/blobs`: {
+      const params = parseBlobsQuery(url.search)
+      if (!params) throw badRequest()
+      await limit(env.RL_BLOB, request)
+      return handleBlobs(env, params)
     }
     case `${API_BASE}/status`: {
       if (url.search !== '') throw badRequest()

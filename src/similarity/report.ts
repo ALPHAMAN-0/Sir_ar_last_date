@@ -11,11 +11,25 @@ import { pairDetail, sharedSets } from './compare.ts'
 import { pairKey, type PairEvidence } from './first.ts'
 import type { FirstState, FirstStates } from './firstRun.ts'
 import { FIRST_NOTE, evidenceLines, firstLabel, firstTone, isNamed, resultLine } from './firstText.ts'
-import { tierLabel, tierTone } from './format.ts'
+import { codeTierLabel, codeTierTone, isNotebook, rangesText, tierLabel, tierTone } from './format.ts'
+import { MAX_TEXT_BYTES } from './codeText.ts'
 import { MIN_BYTES } from './rules.ts'
 import type { RepoGroup } from './run.ts'
+import { codePairDetail, type CodeAnalysis, type CodePair, type CodeRepo, type LineRange } from './sharedCode.ts'
 import type { PairRow, PersonLine, Summary } from './summary.ts'
 import type { Analysis, RepoFiles, StarterFile } from './types.ts'
+
+/** What the shared-code check found, as far as it got. */
+export type CodeInput = {
+  /** Null while the code is still being read or compared. */
+  analysis: CodeAnalysis | null
+  /** The code that was read, by repo. */
+  repos: ReadonlyMap<string, CodeRepo>
+  /** Who handed in each repo. */
+  groups: ReadonlyMap<string, RepoGroup>
+  /** Repos whose code could not be read. */
+  failed: number
+}
 
 export type ReportInput = {
   summary: Summary
@@ -24,6 +38,8 @@ export type ReportInput = {
   trees: ReadonlyMap<string, RepoFiles>
   /** Who had the files first, by pair, as far as it was checked. */
   first?: FirstStates
+  /** The shared-code check. Missing: it had not started. */
+  code?: CodeInput
   info: {
     /** The uploaded file. */
     fileName: string
@@ -310,6 +326,71 @@ function fileRows(input: ReportInput): FileRow[] {
   return rows
 }
 
+/** One pair of repos that share code, for the "Shared code" sheet. */
+type CodeRow = { number: number; pair: CodePair; a: RepoGroup; b: RepoGroup; files: string; identical: string }
+
+const codePaint = (row: CodeRow): Paint => codeTierTone(row.pair.tier)
+
+const CODE_COLUMNS: ReadonlyArray<Column<CodeRow>> = [
+  { title: 'Pair', width: 6, cell: (row) => number(row.number) },
+  { title: 'Result', width: 24, cell: (row) => text(codeTierLabel(row.pair.tier)), paint: codePaint },
+  { title: 'Shared code', width: 12, cell: (row) => share(row.pair.score), paint: codePaint },
+  { title: 'A ID', width: 14, cell: (row) => text(ids(row.a)) },
+  { title: 'A name', width: 24, cell: (row) => text(names(row.a)) },
+  { title: 'A repo', width: 44, cell: (row) => repoLink(row.a.repo) },
+  { title: 'B ID', width: 14, cell: (row) => text(ids(row.b)) },
+  { title: 'B name', width: 24, cell: (row) => text(names(row.b)) },
+  { title: 'B repo', width: 44, cell: (row) => repoLink(row.b.repo) },
+  { title: 'A lines shared', width: 14, cell: (row) => number(row.pair.aShared) },
+  { title: 'A lines compared', width: 16, cell: (row) => number(row.pair.aOwn) },
+  { title: 'Share of A', width: 11, cell: (row) => share(row.pair.aShare) },
+  { title: 'B lines shared', width: 14, cell: (row) => number(row.pair.bShared) },
+  { title: 'B lines compared', width: 16, cell: (row) => number(row.pair.bOwn) },
+  { title: 'Share of B', width: 11, cell: (row) => share(row.pair.bShare) },
+  { title: 'A files', width: 8, cell: (row) => number(row.pair.aFiles) },
+  { title: 'B files', width: 8, cell: (row) => number(row.pair.bFiles) },
+  { title: 'Identical files too', width: 30, cell: (row) => text(row.identical) },
+  { title: 'Files and lines', width: 120, cell: (row) => text(row.files) },
+]
+
+const ALL = Number.POSITIVE_INFINITY
+const where = (path: string, ranges: readonly LineRange[]) =>
+  isNotebook(path) ? `${path} (in its cells)` : `${path} lines ${rangesText(ranges, ALL)}`
+
+/** The pairs of the shared-code check, strongest first, each with its files and lines. */
+function codeRows(input: ReportInput): CodeRow[] {
+  const code = input.code
+  if (!code?.analysis) return []
+  const common = new Set(code.analysis.common)
+  const onPairs = new Map<string, number>()
+  for (const row of input.summary.pairs) {
+    if (row.kind !== 'repos') continue
+    onPairs.set(pairKey(row.summary.aKey, row.summary.bKey), row.number)
+    onPairs.set(pairKey(row.summary.bKey, row.summary.aKey), row.number)
+  }
+  const rows: CodeRow[] = []
+  for (const pair of code.analysis.pairs) {
+    const a = code.groups.get(pair.aKey)
+    const b = code.groups.get(pair.bKey)
+    const aCode = code.repos.get(pair.aKey)
+    const bCode = code.repos.get(pair.bKey)
+    if (!a || !b || !aCode || !bCode) continue
+    const files = codePairDetail(aCode, bCode, common)
+      .map((file) => `${where(file.aPath, file.aRanges)} ↔ ${where(file.bPath, file.bRanges)}: ${file.aShared} of ${file.aOwn} lines`)
+      .join('; ')
+    const also = onPairs.get(pairKey(pair.aKey, pair.bKey))
+    rows.push({
+      number: rows.length + 1,
+      pair,
+      a,
+      b,
+      files,
+      identical: also === undefined ? 'No' : `Yes: pair ${also} on the Pairs sheet`,
+    })
+  }
+  return rows
+}
+
 const SAME_REPO_COLUMNS: ReadonlyArray<Column<RepoGroup>> = [
   { title: 'Repo', width: 44, cell: (group) => repoLink(group.repo) },
   { title: 'People', width: 8, cell: (group) => number(group.people.length) },
@@ -355,8 +436,17 @@ const STARTER_COLUMNS: ReadonlyArray<Column<StarterFile>> = [
   { title: 'Size (bytes)', width: 12, cell: (file) => number(file.size) },
 ]
 
-function infoSheet(input: ReportInput, listedFiles: number, checked: readonly FirstRow[]): XLSX.WorkSheet {
+const NOT_DONE = 'Not finished when this report was made'
+
+function infoSheet(
+  input: ReportInput,
+  listedFiles: number,
+  checked: readonly FirstRow[],
+  code: readonly CodeRow[],
+): XLSX.WorkSheet {
   const { summary, analysis, info } = input
+  const codeDone = Boolean(input.code?.analysis)
+  const codeCount = (value: number) => (codeDone ? number(value) : text(value === 0 ? '' : String(value)))
   const repoPairs = summary.pairs.filter((pair) => pair.kind === 'repos')
   const strongPairs = repoPairs.filter(
     (pair) => pair.summary.tier === 'almost_all' || pair.summary.tier === 'most',
@@ -415,6 +505,24 @@ function infoSheet(input: ReportInput, listedFiles: number, checked: readonly Fi
       'What "had it first" cannot see',
       text(`${FIRST_NOTE} A repo that was deleted and created again looks newer than it is. A pair marked "${NOT_CHECKED}" is checked when its row is opened on the page.`),
     ],
+    ['Pairs that share code', codeDone ? number(code.length) : text(NOT_DONE)],
+    [
+      'Pairs that share most of their code or more',
+      codeCount(code.filter((row) => row.pair.tier === 'almost_all' || row.pair.tier === 'most').length),
+    ],
+    ['Repos whose code could not be read', number(input.code?.failed ?? 0)],
+    [
+      'What "shared code" means',
+      text(
+        `Code that two repos share even where a copy was edited. Spaces, line endings, letter case and comments are ignored, so a copy that changed only those, or some of its lines, is still found. Counts are lines of code: blank lines and comments do not count. Code that more than ${analysis.commonLimit} repos have is not counted on either side, like a starter file. "Shared code" is the larger of the two shares.`,
+      ),
+    ],
+    [
+      'What shared code cannot see',
+      text(
+        `Code whose names were all renamed or whose parts were reordered line by line. Prose, data and settings (README, .txt, .json, .yml), pictures, and files over ${Math.round(MAX_TEXT_BYTES / 1000)} KB are not read. Two people share code when both took it from the same class example or web page, so this is a reason to look, not proof. It does not say who had the code first.`,
+      ),
+    ],
   ]
   const sheet: XLSX.WorkSheet = {}
   lines.forEach(([label, value], r) => {
@@ -434,11 +542,13 @@ function infoSheet(input: ReportInput, listedFiles: number, checked: readonly Fi
  *   Same repo       repos that more than one person handed in
  *   People          one row per sheet row: compared or not, and the closest match
  *   Starter files   contents left out because many repos have them
+ *   Shared code     pairs that share code even where a copy was edited, with the files and lines
  *   Info            how the report was made and what it cannot see
  */
 export function buildReport(input: ReportInput): { book: XLSX.WorkBook; styles: SheetStyle[] } {
   const files = fileRows(input)
   const checked = firstRows(input)
+  const code = codeRows(input)
   const tables: Array<[string, Table]> = [
     ['Pairs', table(pairColumns(input.first), input.summary.pairs)],
     ['Who was first', table(FIRST_COLUMNS, checked)],
@@ -446,11 +556,12 @@ export function buildReport(input: ReportInput): { book: XLSX.WorkBook; styles: 
     ['Same repo', table(SAME_REPO_COLUMNS, input.summary.sameRepo)],
     ['People', table(PEOPLE_COLUMNS, input.summary.people)],
     ['Starter files', table(STARTER_COLUMNS, input.analysis.starter.slice(0, MAX_STARTER_ROWS))],
+    ['Shared code', table(CODE_COLUMNS, code)],
   ]
   const book = XLSX.utils.book_new()
   for (const [name, { sheet }] of tables) XLSX.utils.book_append_sheet(book, sheet, name)
   const listed = files.filter((row) => row.kind !== SAME_REPO_LINE).length
-  XLSX.utils.book_append_sheet(book, infoSheet(input, listed, checked), 'Info')
+  XLSX.utils.book_append_sheet(book, infoSheet(input, listed, checked, code), 'Info')
   return { book, styles: [...tables.map(([, { style }]) => style), { cells: new Map() }] }
 }
 
